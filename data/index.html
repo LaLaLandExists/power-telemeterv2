@@ -1,0 +1,2419 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+  <title>PowerTelemetry · Dashboard</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <script src="/chart.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;500;700&display=swap');
+
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
+
+    /* ── Theme Variables (identical to captive portal) ───────────── */
+    :root,
+    [data-theme="dark"] {
+      --bg: #080b10;
+      --sf: #0f1319;
+      --sf2: #161c26;
+      --bd: #1a2232;
+      --tx: #c8d2de;
+      --txd: #4e5e72;
+      --ac: #00e5a0;
+      --dg: #ff3860;
+      --wn: #ff9f43;
+      --volt: #ffd166;
+      --amp: #06d6a0;
+      --watt: #118ab2;
+      --nrg: #00b4d8;
+      --freq: #a366ff;
+      --pf: #ff6b6b;
+      --chart-grid: #1a2232;
+      --chart-tx: #4e5e72;
+      --chart-tip-bg: #161c26;
+      --chart-tip-bd: #1a2232;
+      --grid-op: .15;
+      --card-hover: rgba(0, 229, 160, .06);
+    }
+
+    [data-theme="light"] {
+      --bg: #f4f5f7;
+      --sf: #ffffff;
+      --sf2: #eef0f4;
+      --bd: #d8dce4;
+      --tx: #1a1e2a;
+      --txd: #6b7588;
+      --ac: #00b880;
+      --dg: #e0294a;
+      --wn: #e08820;
+      --volt: #c8a020;
+      --amp: #00a070;
+      --watt: #0a7aaa;
+      --nrg: #0098b8;
+      --freq: #7030cc;
+      --pf: #d04848;
+      --chart-grid: #e0e4ea;
+      --chart-tx: #8890a0;
+      --chart-tip-bg: #fff;
+      --chart-tip-bd: #d8dce4;
+      --grid-op: .08;
+      --card-hover: rgba(0, 184, 128, .06);
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      color: var(--tx);
+      min-height: 100vh;
+      overflow-x: hidden;
+      transition: background .3s, color .3s;
+    }
+
+    /* Grid texture */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background-image: linear-gradient(var(--bd) 1px, transparent 1px),
+        linear-gradient(90deg, var(--bd) 1px, transparent 1px);
+      background-size: 60px 60px;
+      opacity: var(--grid-op);
+    }
+
+    .M {
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    /* ── Animations ─────────────────────────────────────────────── */
+    @keyframes ci {
+      from {
+        opacity: 0;
+        transform: translateY(16px)
+      }
+
+      to {
+        opacity: 1;
+        transform: none
+      }
+    }
+
+    @keyframes pu {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .4
+      }
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px)
+      }
+
+      to {
+        opacity: 1;
+        transform: none
+      }
+    }
+
+    @keyframes pulse-glow {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(0, 229, 160, 0)
+      }
+
+      50% {
+        box-shadow: 0 0 0 6px rgba(0, 229, 160, .15)
+      }
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    .hdr {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 24px;
+      background: color-mix(in srgb, var(--bg) 85%, transparent);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--bd);
+      transition: background .3s;
+    }
+
+    .hdr-l {
+      display: flex;
+      align-items: center;
+      gap: 12px
+    }
+
+    .hdr h1 {
+      font-size: 17px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .hdr h1 .b {
+      color: var(--ac);
+      display: inline-flex;
+      align-items: center
+    }
+
+    .hdr-r {
+      display: flex;
+      align-items: center;
+      gap: 10px
+    }
+
+    .hdr-badge {
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      font-size: 10px;
+      letter-spacing: .5px;
+      transition: background .3s, border .3s;
+    }
+
+    .hdr-badge.ws-ok {
+      border-color: rgba(0, 229, 160, .4);
+      color: var(--ac);
+      background: rgba(0, 229, 160, .08)
+    }
+
+    .hdr-badge.ws-err {
+      border-color: rgba(255, 56, 96, .4);
+      color: var(--dg);
+      background: rgba(255, 56, 96, .08);
+      animation: pu 1s infinite
+    }
+
+    .theme-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      color: var(--tx);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .2s;
+    }
+
+    .theme-btn:hover {
+      border-color: var(--ac)
+    }
+
+    .theme-btn svg {
+      pointer-events: none
+    }
+
+    .back-btn {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 6px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      color: var(--tx);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+
+    .back-btn:hover {
+      border-color: var(--ac);
+      color: var(--ac)
+    }
+
+    .back-btn svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0
+    }
+
+    .clk {
+      font-size: 12px;
+      color: var(--ac);
+      letter-spacing: .5px
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────── */
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 20px 24px
+    }
+
+    .view {
+      display: none
+    }
+
+    .view.active {
+      display: block
+    }
+
+    /* ── Panel card (exact captive portal pattern) ───────────────── */
+    .panel {
+      background: var(--sf);
+      border: 1px solid var(--bd);
+      border-radius: 10px;
+      overflow: hidden;
+      transition: background .3s, border .3s;
+      position: relative;
+    }
+
+    .panel::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--ac);
+    }
+
+    .panel.cc-volt::before {
+      background: var(--volt)
+    }
+
+    .panel.cc-amp::before {
+      background: var(--amp)
+    }
+
+    .panel.cc-watt::before {
+      background: var(--watt)
+    }
+
+    .panel.cc-nrg::before {
+      background: var(--nrg)
+    }
+
+    .panel.cc-freq::before {
+      background: var(--freq)
+    }
+
+    .panel.cc-pf::before {
+      background: var(--pf)
+    }
+
+    .panel.cc-dg::before {
+      background: var(--dg)
+    }
+
+    .panel.cc-wn::before {
+      background: var(--wn)
+    }
+
+    .panel-head {
+      padding: 16px 16px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-title {
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--txd);
+    }
+
+    .panel-badge {
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      font-size: 10px;
+      color: var(--txd);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .panel-badge.ac {
+      border-color: rgba(0, 229, 160, .4);
+      color: var(--ac);
+      background: rgba(0, 229, 160, .08)
+    }
+
+    .panel-badge.dg {
+      border-color: rgba(255, 56, 96, .4);
+      color: var(--dg);
+      background: rgba(255, 56, 96, .08)
+    }
+
+    .panel-badge.wn {
+      border-color: rgba(255, 159, 67, .4);
+      color: var(--wn);
+      background: rgba(255, 159, 67, .08)
+    }
+
+    .panel-body {
+      padding: 14px 16px 16px
+    }
+
+    /* ── Section label (above grids etc.) ───────────────────────── */
+    .sec-label {
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--txd);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sec-label span {
+      color: var(--ac)
+    }
+
+    /* ── Node index grid ─────────────────────────────────────────── */
+    .node-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 14px;
+    }
+
+    /* Node cards — net-item style from captive portal */
+    .node-card {
+      background: var(--sf);
+      border: 1px solid var(--bd);
+      border-radius: 10px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: all .3s;
+      animation: ci .5s ease both;
+    }
+
+    .node-card:nth-child(2) {
+      animation-delay: .06s
+    }
+
+    .node-card:nth-child(3) {
+      animation-delay: .12s
+    }
+
+    .node-card:nth-child(4) {
+      animation-delay: .18s
+    }
+
+    .node-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--ac);
+      opacity: .5;
+      transition: opacity .3s;
+    }
+
+    /* left accent bar on hover — net-item pattern */
+    .node-card::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--ac);
+      transform: scaleY(0);
+      transition: transform .25s;
+    }
+
+    .node-card:hover {
+      border-color: rgba(0, 229, 160, .35);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px var(--card-hover)
+    }
+
+    .node-card:hover::before {
+      opacity: 1
+    }
+
+    .node-card:hover::after {
+      transform: scaleY(1)
+    }
+
+    .node-card.alarm {
+      border-color: var(--dg) !important
+    }
+
+    .node-card.alarm::before {
+      background: var(--dg) !important;
+      opacity: 1
+    }
+
+    .nc-head {
+      padding: 16px 16px 12px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+
+    .nc-id {
+      font-size: 10px;
+      color: var(--txd);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 2px
+    }
+
+    .nc-label {
+      font-size: 15px;
+      font-weight: 600
+    }
+
+    .nc-status {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .nc-status.on {
+      background: rgba(0, 229, 160, .12);
+      color: var(--ac)
+    }
+
+    .nc-status.off {
+      background: rgba(255, 56, 96, .12);
+      color: var(--dg)
+    }
+
+    .nc-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 0 16px 12px;
+    }
+
+    .nc-metric {
+      text-align: center
+    }
+
+    .nc-metric-val {
+      font-size: 17px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .nc-metric-lbl {
+      font-size: 9px;
+      color: var(--txd);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-top: 2px
+    }
+
+    .nc-alarm-tag {
+      font-size: 9px;
+      color: var(--dg);
+      font-weight: 600;
+      margin-top: 2px;
+      display: none
+    }
+
+    .nc-alarm-tag.show {
+      display: block
+    }
+
+    .nc-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-top: 1px solid var(--bd);
+    }
+
+    .nc-rssi {
+      font-size: 10px;
+      color: var(--txd);
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 5px
+    }
+
+    .nc-relay {
+      font-size: 10px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .nc-relay.on {
+      color: var(--ac)
+    }
+
+    .nc-relay.off {
+      color: var(--dg)
+    }
+
+    .nc-arrow {
+      color: var(--txd);
+      transition: color .2s;
+      display: flex;
+      align-items: center
+    }
+
+    .node-card:hover .nc-arrow {
+      color: var(--ac)
+    }
+
+    /* Signal bars (captive portal pattern) */
+    .sig-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 14px
+    }
+
+    .sig-bars .bar {
+      width: 4px;
+      background: var(--bd);
+      border-radius: 1px;
+      transition: background .2s
+    }
+
+    .sig-bars .bar.lit {
+      background: var(--txd)
+    }
+
+    .sig-bars .bar:nth-child(1) {
+      height: 4px
+    }
+
+    .sig-bars .bar:nth-child(2) {
+      height: 7px
+    }
+
+    .sig-bars .bar:nth-child(3) {
+      height: 10px
+    }
+
+    .sig-bars .bar:nth-child(4) {
+      height: 13px
+    }
+
+    /* Nudge button */
+    .nudge-btn {
+      padding: 3px 10px;
+      border-radius: 5px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      color: var(--txd);
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .nudge-btn:hover {
+      border-color: var(--wn);
+      color: var(--wn)
+    }
+
+    .nudge-btn.nudged {
+      background: rgba(255, 159, 67, .12);
+      border-color: var(--wn);
+      color: var(--wn);
+      pointer-events: none
+    }
+
+    /* Fav star */
+    .fav-star {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--bd);
+      font-size: 16px;
+      transition: color .2s;
+      z-index: 2;
+    }
+
+    .fav-star:hover {
+      color: var(--wn)
+    }
+
+    .fav-star.faved {
+      color: var(--wn)
+    }
+
+    /* ── Empty state ─────────────────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--txd);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .empty-state .ei {
+      margin-bottom: 16px;
+      opacity: .35;
+      display: flex;
+      justify-content: center
+    }
+
+    .empty-state h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--tx);
+      margin-bottom: 6px;
+      font-family: 'Outfit', sans-serif
+    }
+
+    .empty-state p {
+      font-size: 12px;
+      max-width: 360px;
+      margin: 0 auto;
+      line-height: 1.7
+    }
+
+    /* ── Info grid (captive portal .info-grid) ───────────────────── */
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--bd);
+      margin-top: 12px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 11px
+    }
+
+    .info-lbl {
+      color: var(--txd)
+    }
+
+    .info-val {
+      color: var(--tx);
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .info-val.ac {
+      color: var(--ac)
+    }
+
+    .info-val.wn {
+      color: var(--wn)
+    }
+
+    .info-val.dg {
+      color: var(--dg)
+    }
+
+    /* ── Scan / control row ──────────────────────────────────────── */
+    .scan-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px
+    }
+
+    .scan-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--txd);
+      font-weight: 500
+    }
+
+    .scan-btn {
+      padding: 4px 12px;
+      border-radius: 5px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      color: var(--txd);
+      font-size: 10px;
+      cursor: pointer;
+      transition: all .2s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .scan-btn:hover {
+      border-color: var(--ac);
+      color: var(--ac)
+    }
+
+    .scan-btn.spinning svg {
+      animation: spin .8s linear infinite
+    }
+
+    .scan-btn.ac-active {
+      border-color: var(--ac);
+      color: var(--ac);
+      background: rgba(0, 229, 160, .08)
+    }
+
+    /* ── Form elements (captive portal identical) ────────────────── */
+    .form-group {
+      margin-top: 12px
+    }
+
+    .form-label {
+      font-size: 10px;
+      color: var(--txd);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 5px;
+      display: block;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--bd);
+      background: var(--sf2);
+      color: var(--tx);
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .form-input:focus {
+      border-color: var(--ac)
+    }
+
+    .form-input::placeholder {
+      color: var(--txd)
+    }
+
+    .form-input::-webkit-calendar-picker-indicator {
+      filter: invert(.5)
+    }
+
+    /* ── Buttons (captive portal) ────────────────────────────────── */
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+      margin-top: 12px;
+      font-family: 'Outfit', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: var(--ac);
+      color: var(--bg)
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.1);
+      animation: pulse-glow .8s ease
+    }
+
+    .btn-primary:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+      filter: none
+    }
+
+    .btn-ghost {
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      color: var(--txd);
+      margin-top: 8px;
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--ac);
+      color: var(--ac)
+    }
+
+    .btn-danger {
+      background: rgba(255, 56, 96, .1);
+      border: 1px solid rgba(255, 56, 96, .3);
+      color: var(--dg);
+      margin-top: 8px;
+    }
+
+    .btn-danger:hover {
+      background: rgba(255, 56, 96, .2)
+    }
+
+    /* ── Divider ─────────────────────────────────────────────────── */
+    .divider {
+      height: 1px;
+      background: var(--bd);
+      margin: 12px 0
+    }
+
+    /* ── Tabs (relay manual/schedule) ───────────────────────────── */
+    .tab-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+
+    .tab-row div {
+      flex: 1;
+      padding: 6px 0;
+      text-align: center;
+      border-radius: 6px;
+      font-size: 11px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      color: var(--txd);
+      cursor: pointer;
+      transition: all .2s;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tab-row div.active {
+      background: var(--ac);
+      color: var(--bg);
+      border-color: var(--ac);
+      font-weight: 600
+    }
+
+    .tab-row div.tab-disabled {
+      opacity: .3;
+      pointer-events: none
+    }
+
+    .tab-pane {
+      display: none
+    }
+
+    .tab-pane.active {
+      display: block;
+      animation: slideIn .3s ease both
+    }
+
+    /* ── Toggle switch ───────────────────────────────────────────── */
+    .tgl {
+      position: relative;
+      width: 52px;
+      height: 28px;
+      cursor: pointer;
+      flex-shrink: 0
+    }
+
+    .tgl input {
+      display: none
+    }
+
+    .ts {
+      position: absolute;
+      inset: 0;
+      background: var(--sf2);
+      border: 2px solid var(--bd);
+      border-radius: 28px;
+      transition: all .3s
+    }
+
+    .ts::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--txd);
+      transition: all .3s
+    }
+
+    .tgl input:checked+.ts {
+      background: var(--ac);
+      border-color: var(--ac)
+    }
+
+    .tgl input:checked+.ts::before {
+      transform: translateX(24px);
+      background: var(--bg)
+    }
+
+    /* ── Relay state display ─────────────────────────────────────── */
+    .relay-state-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--sf2);
+      border: 1px solid var(--bd);
+      margin-bottom: 12px;
+      transition: background .3s, border .3s;
+    }
+
+    .relay-state-lbl {
+      font-size: 10px;
+      color: var(--txd);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 3px
+    }
+
+    .relay-state-val {
+      font-size: 20px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .relay-state-val.on {
+      color: var(--ac)
+    }
+
+    .relay-state-val.off {
+      color: var(--dg)
+    }
+
+    .relay-mode-lbl {
+      font-size: 10px;
+      color: var(--txd);
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    /* ── Commit / pending banner ─────────────────────────────────── */
+    .commit-banner {
+      display: none;
+      padding: 4px 10px;
+      border-radius: 5px;
+      background: rgba(255, 159, 67, .15);
+      color: var(--wn);
+      border: 1px solid rgba(255, 159, 67, .3);
+      font-size: 10px;
+      font-weight: 600;
+      margin-top: 10px;
+      animation: pu 1.2s infinite;
+      font-family: 'JetBrains Mono', monospace;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .commit-banner.show {
+      display: inline-flex
+    }
+
+    /* ── Schedule active info box ────────────────────────────────── */
+    .sched-info {
+      display: none;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: rgba(0, 229, 160, .06);
+      border: 1px solid rgba(0, 229, 160, .15);
+      font-size: 11px;
+      color: var(--ac);
+      margin-bottom: 10px;
+      line-height: 1.8;
+      font-family: 'JetBrains Mono', monospace;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+
+    .sched-info.show {
+      display: flex
+    }
+
+    .sched-clear {
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(255, 56, 96, .1);
+      border: 1px solid rgba(255, 56, 96, .25);
+      color: var(--dg);
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      margin-left: 10px;
+      transition: background .2s;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .sched-clear:hover {
+      background: rgba(255, 56, 96, .2)
+    }
+
+    .sched-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-left: 6px;
+    }
+
+    .sched-badge.waiting {
+      background: rgba(255, 159, 67, .15);
+      color: var(--wn)
+    }
+
+    .sched-badge.active {
+      background: rgba(0, 229, 160, .12);
+      color: var(--ac)
+    }
+
+    /* ── Offline overlay ─────────────────────────────────────────── */
+    .offline-msg {
+      display: none;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: rgba(255, 56, 96, .08);
+      border: 1px solid rgba(255, 56, 96, .2);
+      font-size: 11px;
+      color: var(--dg);
+      text-align: center;
+      margin-bottom: 12px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .offline-msg.show {
+      display: block
+    }
+
+    .frozen {
+      pointer-events: none;
+      opacity: .45;
+      transition: opacity .3s
+    }
+
+    /* ── Metric cards (detail view) ──────────────────────────────── */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .metric-card {
+      background: var(--sf);
+      border: 1px solid var(--bd);
+      border-radius: 10px;
+      padding: 14px;
+      position: relative;
+      overflow: hidden;
+      transition: all .3s;
+      animation: ci .5s ease both;
+    }
+
+    .metric-card:nth-child(1) {
+      animation-delay: .05s
+    }
+
+    .metric-card:nth-child(2) {
+      animation-delay: .1s
+    }
+
+    .metric-card:nth-child(3) {
+      animation-delay: .15s
+    }
+
+    .metric-card:nth-child(4) {
+      animation-delay: .2s
+    }
+
+    .metric-card:nth-child(5) {
+      animation-delay: .25s
+    }
+
+    .metric-card:nth-child(6) {
+      animation-delay: .3s
+    }
+
+    .metric-card:hover {
+      border-color: var(--cc, var(--ac))
+    }
+
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--cc, var(--ac));
+    }
+
+    .metric-card.alarm-card {
+      border-color: var(--dg) !important;
+      animation: pu 1.5s infinite
+    }
+
+    .metric-card.alarm-card::before {
+      background: var(--dg) !important
+    }
+
+    .metric-lbl {
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--txd);
+      margin-bottom: 6px;
+    }
+
+    .metric-val {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--cc, var(--ac));
+      line-height: 1;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .metric-unit {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--txd);
+      margin-left: 3px
+    }
+
+    .metric-bar {
+      margin-top: 10px;
+      height: 3px;
+      background: var(--sf2);
+      border-radius: 2px;
+      overflow: hidden
+    }
+
+    .metric-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--cc, var(--ac));
+      transition: width .6s ease;
+      width: 0
+    }
+
+    .alarm-tag {
+      display: none;
+      margin-top: 8px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(255, 56, 96, .12);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--dg);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .alarm-tag.show {
+      display: inline-block
+    }
+
+    /* ── Detail header ───────────────────────────────────────────── */
+    .det-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      animation: ci .4s ease both;
+    }
+
+    .det-hdr-l h2 {
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
+      transition: border-color .2s;
+      display: inline
+    }
+
+    .det-hdr-l h2:hover {
+      border-color: var(--txd)
+    }
+
+    .det-hdr-l .det-sub {
+      font-size: 11px;
+      color: var(--txd);
+      margin-top: 3px;
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .det-hdr-r {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .rename-input {
+      font-size: 18px;
+      font-weight: 700;
+      background: var(--sf2);
+      border: 1px solid var(--ac);
+      border-radius: 6px;
+      color: var(--tx);
+      padding: 2px 8px;
+      outline: none;
+      width: 200px;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    /* ── Chart section ───────────────────────────────────────────── */
+    .chart-wrap {
+      position: relative;
+      height: 220px
+    }
+
+    @media(max-width:600px) {
+      .chart-wrap {
+        height: 180px
+      }
+    }
+
+    /* ── Detail layout ───────────────────────────────────────────── */
+    .det-bottom {
+      display: grid;
+      grid-template-columns: 1fr 310px;
+      gap: 12px;
+      animation: ci .5s ease both;
+      animation-delay: .3s;
+    }
+
+    @media(max-width:900px) {
+      .det-bottom {
+        grid-template-columns: 1fr
+      }
+    }
+
+    .side-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px
+    }
+
+    /* ── Cost display ────────────────────────────────────────────── */
+    .cost-val {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--nrg);
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    .cost-sub {
+      font-size: 11px;
+      color: var(--txd);
+      margin-top: 4px;
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    /* ── Threshold section ───────────────────────────────────────── */
+    .thr-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px
+    }
+
+    .thr-input {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--bd);
+      background: var(--sf2);
+      color: var(--tx);
+      font-size: 12px;
+      outline: none;
+      transition: border-color .2s;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .thr-input:focus {
+      border-color: var(--ac)
+    }
+
+    .thr-set-btn {
+      padding: 8px 14px;
+      border-radius: 6px;
+      background: var(--ac);
+      border: none;
+      color: var(--bg);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+      white-space: nowrap;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .thr-set-btn:hover {
+      filter: brightness(1.1)
+    }
+
+    /* ── Inline confirm ──────────────────────────────────────────── */
+    .confirm-wrap {
+      position: relative
+    }
+
+    .confirm {
+      display: none;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--sf) 92%, transparent);
+      border: 1px solid rgba(255, 56, 96, .35);
+      backdrop-filter: blur(4px);
+      font-size: 11px;
+      color: var(--dg);
+      align-items: center;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      box-shadow: 0 -4px 16px rgba(0, 0, 0, .25);
+    }
+
+    .confirm.show {
+      display: flex
+    }
+
+    .confirm-msg {
+      flex: 1
+    }
+
+    .confirm-y,
+    .confirm-n {
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all .2s
+    }
+
+    .confirm-y {
+      background: var(--dg);
+      color: #fff
+    }
+
+    .confirm-y:hover {
+      filter: brightness(1.2)
+    }
+
+    .confirm-n {
+      background: var(--sf2);
+      color: var(--txd);
+      border: 1px solid var(--bd)
+    }
+
+    .confirm-n:hover {
+      border-color: var(--txd)
+    }
+
+    /* ── Gateway info panels ─────────────────────────────────────── */
+    .gw-section {
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      animation: ci .5s ease both;
+      animation-delay: .25s
+    }
+
+    /* ── Log lines (captive portal .log-line) ────────────────────── */
+    .log-line {
+      margin-bottom: 3px;
+      animation: slideIn .2s ease both;
+      font-size: 11px
+    }
+
+    .log-line .ts {
+      color: var(--txd)
+    }
+
+    .log-line .ok {
+      color: var(--ac)
+    }
+
+    .log-line .err {
+      color: var(--dg)
+    }
+
+    .log-line .info {
+      color: var(--wn)
+    }
+
+    /* ── Responsive ──────────────────────────────────────────────── */
+    @media(max-width:600px) {
+      .wrap {
+        padding: 12px 14px
+      }
+
+      .hdr {
+        padding: 10px 14px
+      }
+
+      .metric-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px
+      }
+
+      .metric-val {
+        font-size: 20px
+      }
+
+      .hdr h1 {
+        font-size: 15px
+      }
+
+      .vDet-active .hdr h1 {
+        display: none
+      }
+
+      .vDet-active .hdr-badge.node-count {
+        display: none
+      }
+
+      .back-btn {
+        padding: 5px 8px;
+        font-size: 11px
+      }
+
+      .node-grid {
+        grid-template-columns: 1fr
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header class="hdr">
+    <div class="hdr-l">
+      <button class="back-btn" id="backBtn" onclick="goHome()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+          stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+        Nodes
+      </button>
+      <h1>
+        <span class="b">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        </span>
+        PowerTelemetry
+      </h1>
+    </div>
+    <div class="hdr-r">
+      <span class="clk M" id="sysClock">--:--</span>
+      <span class="hdr-badge M ws-err" id="wsStatus">
+        <svg width="8" height="8" viewBox="0 0 10 10" style="display:inline;margin-right:4px">
+          <circle cx="5" cy="5" r="4" fill="currentColor" />
+        </svg>WS
+      </span>
+      <span class="hdr-badge M node-count" id="nodeCount">0 nodes</span>
+      <button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">
+        <svg id="themeIco" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="wrap">
+
+    <!-- ── INDEX VIEW ──────────────────────────────────────────── -->
+    <div class="view active" id="vIdx">
+
+      <div class="scan-row" style="margin-bottom:16px">
+        <div class="sec-label" style="margin-bottom:0">Connected Nodes &mdash; <span id="idxCount">0</span></div>
+        <button class="scan-btn M" id="cfgBtn" onclick="openSetup()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.07 4.93a10 10 0 0 1 1.44 13.56" />
+            <path d="M4.93 4.93a10 10 0 0 0-1.44 13.56" />
+            <path d="M12 2v2m0 16v2M2 12h2m16 0h2" />
+          </svg>
+          Setup
+        </button>
+      </div>
+
+      <!-- Node grid -->
+      <div class="node-grid" id="nodeGrid"></div>
+
+      <!-- Empty state -->
+      <div class="empty-state" id="emptyState" style="display:none">
+        <div class="ei">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
+            <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
+            <line x1="6" y1="1" x2="6" y2="4" />
+            <line x1="10" y1="1" x2="10" y2="4" />
+            <line x1="14" y1="1" x2="14" y2="4" />
+          </svg>
+        </div>
+        <h2>Waiting for nodes&hellip;</h2>
+        <p>Power on sensor nodes. They will appear here automatically once connected.</p>
+      </div>
+
+      <!-- Gateway section -->
+      <div class="gw-section">
+
+        <!-- Energy cost rate -->
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-title">Energy Cost Rate</span>
+            <span class="panel-badge M">per kWh</span>
+          </div>
+          <div class="panel-body">
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="number" class="form-input M" id="costRateIn" min="0.01" step="0.01"
+                placeholder="Rate per kWh" style="flex:1;margin-top:0">
+              <button class="thr-set-btn M" onclick="setCostRate()" id="costSetBtn">Set Rate</button>
+            </div>
+            <div class="divider"></div>
+            <div class="confirm-wrap">
+              <button class="btn btn-danger M" style="margin-top:0;font-size:11px"
+                onclick="showConfirm('cfmAllEnergy')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="1 4 1 10 7 10" />
+                  <path d="M3.51 15a9 9 0 1 0 .49-3.5" />
+                </svg>
+                Reset All Energy Counters
+              </button>
+              <div class="confirm M" id="cfmAllEnergy">
+                <span class="confirm-msg">Reset energy for ALL nodes?</span>
+                <button class="confirm-y" onclick="execClearAllEnergy()">Yes</button>
+                <button class="confirm-n" onclick="hideConfirm('cfmAllEnergy')">No</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gateway info -->
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-title">Gateway</span>
+            <button class="scan-btn M" onclick="doSyncTime()" id="syncBtn">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-.08-4.36" />
+              </svg>
+              Sync Time
+            </button>
+          </div>
+          <div class="panel-body">
+            <div class="info-grid" style="border:none;margin:0;padding:0">
+              <div class="info-row"><span class="info-lbl">System Time</span><span class="info-val M" id="gwTimeVal">Not
+                  synced</span></div>
+              <div class="info-row"><span class="info-lbl">Uptime</span><span class="info-val M" id="gwUptime">--</span>
+              </div>
+              <div class="info-row"><span class="info-lbl">Free Heap</span><span class="info-val M"
+                  id="gwHeap">--</span></div>
+              <div class="info-row"><span class="info-lbl">WiFi RSSI</span><span class="info-val M"
+                  id="gwRSSI">--</span></div>
+              <div class="info-row"><span class="info-lbl">Nodes</span><span class="info-val M" id="gwNodes">--</span>
+              </div>
+            </div>
+            <div id="gwTimeWarn"
+              style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;background:rgba(255,159,67,.1);border:1px solid rgba(255,159,67,.25);font-size:10px;color:var(--wn)"
+              class="M">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                style="margin-right:4px;vertical-align:middle">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              Time not synced — schedules unavailable
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── DETAIL VIEW ─────────────────────────────────────────── -->
+    <div class="view" id="vDet">
+
+      <!-- Detail header -->
+      <div class="det-hdr">
+        <div class="det-hdr-l">
+          <h2 id="detLabel" onclick="startRename()" title="Click to rename">--</h2>
+          <div class="det-sub M" id="detSub">--</div>
+        </div>
+        <div class="det-hdr-r">
+          <button class="nudge-btn M" id="detNudge" onclick="doNudge(cNid)">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            Nudge
+          </button>
+          <span class="panel-badge M nc-status" id="detStatus">--</span>
+        </div>
+      </div>
+
+      <!-- Metric cards -->
+      <div class="metric-grid">
+        <div class="metric-card" style="--cc:var(--volt)">
+          <div class="metric-lbl">Voltage</div>
+          <div class="metric-val M"><span id="dV">--</span><span class="metric-unit">V</span></div>
+          <div class="metric-bar">
+            <div class="metric-bar-fill" id="bV"></div>
+          </div>
+        </div>
+        <div class="metric-card" style="--cc:var(--amp)">
+          <div class="metric-lbl">Current</div>
+          <div class="metric-val M"><span id="dI">--</span><span class="metric-unit">A</span></div>
+          <div class="metric-bar">
+            <div class="metric-bar-fill" id="bI"></div>
+          </div>
+        </div>
+        <div class="metric-card" id="pwrCard" style="--cc:var(--watt)">
+          <div class="metric-lbl">Active Power</div>
+          <div class="metric-val M"><span id="dP">--</span><span class="metric-unit">W</span></div>
+          <div class="metric-bar">
+            <div class="metric-bar-fill" id="bP"></div>
+          </div>
+          <div class="alarm-tag M" id="alarmTag">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              style="margin-right:3px;vertical-align:middle">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Over-power alarm
+          </div>
+        </div>
+        <div class="metric-card" style="--cc:var(--nrg)">
+          <div class="metric-lbl">Energy</div>
+          <div class="metric-val M"><span id="dE">--</span><span class="metric-unit" id="dEu">Wh</span></div>
+          <div class="metric-bar">
+            <div class="metric-bar-fill" id="bE"></div>
+          </div>
+        </div>
+        <div class="metric-card" style="--cc:var(--freq)">
+          <div class="metric-lbl">Frequency</div>
+          <div class="metric-val M"><span id="dF">--</span><span class="metric-unit">Hz</span></div>
+          <div class="metric-bar">
+            <div class="metric-bar-fill" id="bF"></div>
+          </div>
+        </div>
+        <div class="metric-card" style="--cc:var(--pf)">
+          <div class="metric-lbl">Power Factor</div>
+          <div class="metric-val M"><span id="dPF">--</span></div>
+          <div class="metric-bar">
+            <div class="metric-bar-fill" id="bPF"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart + sidebar -->
+      <div class="det-bottom">
+
+        <!-- Chart panel -->
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-title">History</span>
+            <div style="display:flex;gap:3px">
+              <button class="scan-btn M" data-m="power" onclick="swChart('power')">Power</button>
+              <button class="scan-btn M" data-m="voltage" onclick="swChart('voltage')">Voltage</button>
+              <button class="scan-btn M" data-m="current" onclick="swChart('current')">Current</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="chart-wrap"><canvas id="chartCanvas"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Right sidebar -->
+        <div class="side-col">
+
+          <!-- Relay control -->
+          <div class="panel" id="relayPanel">
+            <div class="panel-head">
+              <span class="panel-title">Relay Control</span>
+            </div>
+            <div class="panel-body">
+              <div class="offline-msg M" id="offlineMsg">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="margin-right:5px;vertical-align:middle">
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                  <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+                  <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+                  <path d="M10.71 5.05A16 16 0 0 1 22.56 9" />
+                  <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                  <line x1="12" y1="20" x2="12" y2="20" stroke-width="2.5" />
+                </svg>
+                Node offline — controls unavailable
+              </div>
+
+              <div class="relay-state-box">
+                <div>
+                  <div class="relay-state-lbl">Relay State</div>
+                  <div class="relay-state-val off M" id="relayState">OFF</div>
+                </div>
+                <div class="relay-mode-lbl" id="relayMode">MANUAL</div>
+              </div>
+
+              <div id="relayCtrl">
+                <div class="tab-row M" id="relayTabs">
+                  <div class="active" data-mode="manual" onclick="setRelayTab('manual')">Manual</div>
+                  <div data-mode="schedule" onclick="setRelayTab('schedule')">Schedule</div>
+                </div>
+                <div id="relayInner">
+                  <!-- Manual -->
+                  <div class="tab-pane active" id="tabManual">
+                    <div style="display:flex;align-items:center;justify-content:flex-end">
+                      <label class="tgl"><input type="checkbox" id="relayToggle" onchange="doManual(this.checked)">
+                        <div class="ts"></div>
+                      </label>
+                    </div>
+                    <div class="commit-banner M" id="commitBanner">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                        style="animation:spin 1s linear infinite">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 1 1-.08-4.36" />
+                      </svg>
+                      Committing&hellip;
+                    </div>
+                  </div>
+                  <!-- Schedule -->
+                  <div class="tab-pane" id="tabSchedule">
+                    <div class="sched-info M" id="schedInfo"></div>
+                    <div class="form-group">
+                      <label class="form-label">Turn ON at</label>
+                      <input type="time" class="form-input M" id="schedStart" value="08:00">
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Turn OFF at</label>
+                      <input type="time" class="form-input M" id="schedEnd" value="17:00">
+                    </div>
+                    <div style="font-size:10px;color:var(--txd);margin-top:6px;font-family:'JetBrains Mono',monospace">
+                      Repeats daily. Overnight wrap supported.</div>
+                    <button class="btn btn-primary" onclick="doSchedule()">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
+                      </svg>
+                      Set Daily Schedule
+                    </button>
+                    <div class="commit-banner M" id="commitBannerSched">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                        style="animation:spin 1s linear infinite">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 1 1-.08-4.36" />
+                      </svg>
+                      Committing&hellip;
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Energy cost -->
+          <div class="panel cc-nrg">
+            <div class="panel-head">
+              <span class="panel-title">Energy Cost</span>
+            </div>
+            <div class="panel-body">
+              <div class="cost-val" id="costVal">0.00</div>
+              <div class="cost-sub"><span id="costRate2"></span> &bull; <span id="costEnergy"></span></div>
+              <div class="divider"></div>
+              <div class="confirm-wrap">
+                <button class="btn btn-danger M" style="margin-top:0;font-size:11px" onclick="showConfirm('cfmEnergy')">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 .49-3.5" />
+                  </svg>
+                  Reset Energy Counter
+                </button>
+                <div class="confirm M" id="cfmEnergy">
+                  <span class="confirm-msg">Reset energy for this node?</span>
+                  <button class="confirm-y" onclick="execClearEnergy()">Yes</button>
+                  <button class="confirm-n" onclick="hideConfirm('cfmEnergy')">No</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Power alarm threshold -->
+          <div class="panel cc-dg" id="thrPanel">
+            <div class="panel-head">
+              <span class="panel-title">Power Alarm</span>
+              <span class="panel-badge M">1–23000 W</span>
+            </div>
+            <div class="panel-body">
+              <div id="thrCtrl">
+                <div class="thr-row">
+                  <input type="number" class="thr-input M" id="thrInput" min="1" max="23000" step="1"
+                    placeholder="Threshold (W)">
+                  <button class="thr-set-btn M" onclick="doSetThreshold()">Set</button>
+                </div>
+                <div style="font-size:10px;color:var(--txd);font-family:'JetBrains Mono',monospace">PZEM alarm triggers
+                  when active power exceeds this threshold.</div>
+              </div>
+              <div class="commit-banner M" id="thrBanner">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                  stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite">
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-.08-4.36" />
+                </svg>
+                Committing&hellip;
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /side-col -->
+      </div><!-- /det-bottom -->
+    </div><!-- /vDet -->
+
+  </div><!-- /wrap -->
+
+  <!-- ── Footer ─────────────────────────────────────────────────── -->
+  <footer
+    style="position:relative;z-index:1;text-align:center;padding:14px;font-size:10px;color:var(--txd);border-top:1px solid var(--bd);font-family:'JetBrains Mono',monospace">
+    PowerTelemetry Gateway &middot; Dashboard &middot; <span style="color:var(--ac)" id="fwVer">v1.0.0</span>
+  </footer>
+
+  <script>
+    /* ── State ─────────────────────────────────────────────────────── */
+    let cNid = null, chart = null, cMet = 'power', socket = null, wsOk = false, fbT = null;
+    let NC = [], gwTimeSet = false, gwTime = '--:--:--';
+    let costRate = parseFloat(localStorage.getItem('pt-costRate')) || 12.00;
+
+    const MC = {
+      power: { l: 'Power (W)', c: '#118ab2', k: 'p', n: 'power' },
+      voltage: { l: 'Voltage (V)', c: '#ffd166', k: 'v', n: 'voltage' },
+      current: { l: 'Current (A)', c: '#06d6a0', k: 'i', n: 'current' }
+    };
+    const SL = ['', 'Waiting', 'Active'];
+    const SC = ['', 'sched-badge waiting', 'sched-badge active'];
+
+    /* ── Theme ─────────────────────────────────────────────────────── */
+    const SUN_PATHS = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+    const MOON_PATH = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+
+    function getTheme() { return localStorage.getItem('pt-theme') || (window.matchMedia('(prefers-color-scheme:light)').matches ? 'light' : 'dark'); }
+    function applyTheme(t) {
+      document.documentElement.setAttribute('data-theme', t);
+      $('themeIco').innerHTML = t === 'dark' ? MOON_PATH : SUN_PATHS;
+      localStorage.setItem('pt-theme', t);
+      refreshChartTheme();
+    }
+    function toggleTheme() { applyTheme(getTheme() === 'dark' ? 'light' : 'dark'); }
+
+    function refreshChartTheme() {
+      if (!chart) return;
+      const grid = getCS('--chart-grid'), tx = getCS('--chart-tx'),
+        tipBg = getCS('--chart-tip-bg'), tipBd = getCS('--chart-tip-bd');
+      chart.options.plugins.tooltip.backgroundColor = tipBg;
+      chart.options.plugins.tooltip.borderColor = tipBd;
+      chart.options.plugins.tooltip.titleColor = tx;
+      chart.options.plugins.tooltip.bodyColor = tx;
+      chart.options.scales.x.grid.color = grid;
+      chart.options.scales.x.ticks.color = tx;
+      chart.options.scales.y.grid.color = grid;
+      chart.options.scales.y.ticks.color = tx;
+      chart.update('none');
+    }
+
+    /* ── Helpers ───────────────────────────────────────────────────── */
+    function $(id) { return document.getElementById(id); }
+    function sT(id, v) { const e = $(id); if (e) e.textContent = v; }
+    function sB(id, v, mx) { const e = $(id); if (e) e.style.width = Math.min(100, Math.max(0, (v / mx) * 100)) + '%'; }
+    function fU(s) { if (!s || s < 0) return '--'; return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm ' + (s % 60) + 's'; }
+    function fP(w) { return w >= 1000 ? (w / 1000).toFixed(1) + 'k' : w.toFixed(0); }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function rssiToBars(r) { if (r >= -55) return 4; if (r >= -65) return 3; if (r >= -75) return 2; return 1; }
+
+    /* ── Clock ─────────────────────────────────────────────────────── */
+    function updateClock() { const d = new Date(); $('sysClock').textContent = pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+    setInterval(updateClock, 10000); updateClock();
+
+    /* ── Favorites ─────────────────────────────────────────────────── */
+    function getFavs() { try { return JSON.parse(localStorage.getItem('pt-favs') || '[]'); } catch (e) { return []; } }
+    function saveFavs(f) { localStorage.setItem('pt-favs', JSON.stringify(f)); }
+    function isFav(id) { return getFavs().includes(id); }
+    function toggleFav(id, ev) { ev.stopPropagation(); let f = getFavs(); if (f.includes(id)) f = f.filter(x => x !== id); else f.push(id); saveFavs(f); renderGrid(NC); }
+
+    /* ── WebSocket ─────────────────────────────────────────────────── */
+    function connectWS() {
+      const u = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws';
+      socket = new WebSocket(u);
+      socket.onopen = () => { wsOk = true; wsDot(true); syncTime(); wsSend({ cmd: 'get_nodes' }); };
+      socket.onmessage = e => { try { onMsg(JSON.parse(e.data)); } catch (x) { } };
+      socket.onclose = () => { wsOk = false; wsDot(false); startFallback(); setTimeout(connectWS, 3000); };
+      socket.onerror = () => socket.close();
+    }
+    function wsSend(o) { if (wsOk && socket && socket.readyState === 1) socket.send(JSON.stringify(o)); }
+    function wsDot(ok) {
+      const el = $('wsStatus');
+      el.className = 'hdr-badge M ' + (ok ? 'ws-ok' : 'ws-err');
+      el.innerHTML = `<svg width="8" height="8" viewBox="0 0 10 10" style="display:inline;margin-right:4px"><circle cx="5" cy="5" r="4" fill="currentColor"/></svg>${ok ? 'WS' : 'WS✘'}`;
+    }
+    function syncTime() { const d = new Date(); wsSend({ cmd: 'set_time', hour: d.getHours(), minute: d.getMinutes(), second: d.getSeconds() }); }
+    function doSyncTime() {
+      syncTime();
+      const btn = $('syncBtn'); if (!btn) return;
+      btn.classList.add('ac-active');
+      const prev = btn.innerHTML;
+      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Synced';
+      clearTimeout(btn._t); btn._t = setTimeout(() => { btn.innerHTML = prev; btn.classList.remove('ac-active'); }, 2500);
+    }
+
+    function updGwTime() {
+      const el = $('gwTimeVal'); if (el) el.textContent = gwTimeSet ? gwTime : 'Not synced';
+      const w = $('gwTimeWarn'); if (w) w.style.display = gwTimeSet ? 'none' : 'block';
+    }
+
+    /* ── Message handler ───────────────────────────────────────────── */
+    function onMsg(m) {
+      if (m.timeSet !== undefined) gwTimeSet = m.timeSet;
+      if (m.time) gwTime = m.time;
+      updGwTime();
+
+      if (m.type === 'nodes') {
+        NC = m.nodes || []; if (!cNid) renderGrid(NC);
+        sT('idxCount', m.count || 0);
+        $('nodeCount').textContent = (m.count || 0) + ' node' + ((m.count || 0) !== 1 ? 's' : '');
+      }
+      else if (m.type === 'telemetry') {
+        const n = m.node;
+        const o = { id: n.id, label: n.label, online: n.online, rssi: n.rssi, voltage: n.voltage, current: n.current, power: n.power, energy: n.energy, frequency: n.frequency, powerFactor: n.powerFactor, relayState: n.relayState, relayMode: n.relayMode, schedState: n.schedState, alarmState: n.alarmState, age: n.age, pending: n.pending, hasSched: n.hasSched, schedStart: n.schedStart, schedEnd: n.schedEnd };
+        const i = NC.findIndex(x => x.id === n.id); if (i >= 0) Object.assign(NC[i], o); else NC.push(o);
+        if (!cNid) renderGrid(NC);
+        if (cNid === n.id) { updateDetail(o); addChartPoint(n); }
+      }
+      else if (m.type === 'name_changed') {
+        const i = NC.findIndex(x => x.id === m.node);
+        if (i >= 0) NC[i].label = m.name;
+        if (cNid === m.node && !document.querySelector('.rename-input')) sT('detLabel', m.name);
+        if (!cNid) renderGrid(NC);
+      }
+      else if (m.type === 'time_set') { gwTimeSet = true; if (m.time) gwTime = m.time; updGwTime(); }
+      else if (m.type === 'threshold_ack') { $('thrBanner').classList.remove('show'); $('thrCtrl').classList.remove('frozen'); if (!m.success) alert('Threshold command failed'); }
+      else if (m.type === 'energy_cleared') { const i = NC.findIndex(x => x.id === m.node); if (i >= 0) NC[i].energy = 0; if (cNid === m.node) updateDetail(NC.find(x => x.id === cNid) || {}); }
+      else if (m.type === 'all_energy_cleared') { NC.forEach(n => n.energy = 0); if (cNid) { const c = NC.find(x => x.id === cNid); if (c) updateDetail(c); } if (!cNid) renderGrid(NC); }
+      else if ((m.type === 'relay_ack' || m.type === 'schedule_ack' || m.type === 'clear_ack') && !m.success) alert('Command failed');
+    }
+
+    /* ── Fallback polling ──────────────────────────────────────────── */
+    function startFallback() {
+      if (fbT) return;
+      fbT = setInterval(async () => {
+        try {
+          if (cNid) { const r = await fetch('/api/node/' + cNid + '/live'); const d = await r.json(); if (!d.error) updateDetail(d); }
+          else { const r = await fetch('/api/nodes'); const d = await r.json(); NC = d.nodes || []; renderGrid(NC); }
+        } catch (e) { }
+      }, 3000);
+    }
+
+    /* ── Routing ───────────────────────────────────────────────────── */
+    function route() { const h = location.hash || '#/'; const m = h.match(/^#\/node\/(\d+)$/); m ? showDetail(parseInt(m[1])) : showIndex(); }
+    window.addEventListener('hashchange', route);
+    function goHome() { location.hash = '#/'; }
+    function goNode(id) { location.hash = '#/node/' + id; }
+    function openSetup() { window.location.href = '/wifi_config.html'; }
+
+    function showIndex() {
+      cNid = null;
+      document.body.classList.remove('vDet-active');
+      $('vIdx').classList.add('active'); $('vDet').classList.remove('active');
+      $('backBtn').style.display = 'none';
+      renderGrid(NC); wsSend({ cmd: 'get_nodes' });
+    }
+
+    /* ── Render node grid ──────────────────────────────────────────── */
+    function renderGrid(ns) {
+      const g = $('nodeGrid'), em = $('emptyState');
+      if (!ns.length) { g.innerHTML = ''; em.style.display = 'block'; return; }
+      em.style.display = 'none';
+      const favs = getFavs();
+      const sorted = [...ns].sort((a, b) => { const af = favs.includes(a.id) ? 0 : 1, bf = favs.includes(b.id) ? 0 : 1; return af - bf || a.id - b.id; });
+      const ids = new Set(sorted.map(n => String(n.id)));
+      g.querySelectorAll('.node-card').forEach(c => { if (!ids.has(c.dataset.id)) c.remove(); });
+      const curOrder = [...g.querySelectorAll('.node-card')].map(c => c.dataset.id);
+      const newOrder = sorted.map(n => String(n.id));
+      const orderChanged = curOrder.length !== newOrder.length || curOrder.some((v, i) => v !== newOrder[i]);
+      sorted.forEach(n => {
+        let c = g.querySelector(`.node-card[data-id="${n.id}"]`);
+        const isNew = !c;
+        if (isNew) { c = document.createElement('div'); c.className = 'node-card'; c.dataset.id = n.id; c.onclick = () => goNode(n.id); }
+        const rs = n.relayState !== undefined ? n.relayState : n.relay;
+        const al = n.alarmState || n.alarm || 0;
+        const faved = isFav(n.id);
+        const fp = `${n.label}|${n.online}|${(n.voltage || 0).toFixed(1)}|${(n.current || 0).toFixed(2)}|${fP(n.power || 0)}|${rs}|${al}|${faved}|${n.rssi}`;
+        if (c._fp !== fp) {
+          c._fp = fp;
+          c.classList.toggle('alarm', !!al);
+          const bars = rssiToBars(n.rssi || 0);
+          c.innerHTML = `
+        <button class="fav-star ${faved ? 'faved' : ''}" onclick="toggleFav(${n.id},event)">${faved ? '★' : '☆'}</button>
+        <div class="nc-head">
+          <div>
+            <div class="nc-id M">Node #${n.id}</div>
+            <div class="nc-label">${esc(n.label)}</div>
+          </div>
+          <span class="nc-status ${n.online ? 'on' : 'off'} M">${n.online ? 'ONLINE' : 'OFFLINE'}</span>
+        </div>
+        <div class="nc-metrics">
+          <div class="nc-metric">
+            <div class="nc-metric-val M" style="color:var(--volt)">${(n.voltage || 0).toFixed(1)}<small style="font-size:10px;color:var(--txd)"> V</small></div>
+            <div class="nc-metric-lbl">Voltage</div>
+          </div>
+          <div class="nc-metric">
+            <div class="nc-metric-val M" style="color:${al ? 'var(--dg)' : 'var(--watt)'}">${fP(n.power || 0)}<small style="font-size:10px;color:var(--txd)"> W</small></div>
+            <div class="nc-metric-lbl">Power</div>
+            <div class="nc-alarm-tag ${al ? 'show' : ''}">⚠ ALARM</div>
+          </div>
+          <div class="nc-metric">
+            <div class="nc-metric-val M" style="color:var(--amp)">${(n.current || 0).toFixed(2)}<small style="font-size:10px;color:var(--txd)"> A</small></div>
+            <div class="nc-metric-lbl">Current</div>
+          </div>
+        </div>
+        <div class="nc-foot M">
+          <span class="nc-rssi">
+            <div class="sig-bars">
+              <div class="bar ${bars >= 1 ? 'lit' : ''}"></div>
+              <div class="bar ${bars >= 2 ? 'lit' : ''}"></div>
+              <div class="bar ${bars >= 3 ? 'lit' : ''}"></div>
+              <div class="bar ${bars >= 4 ? 'lit' : ''}"></div>
+            </div>
+            ${n.online ? (n.rssi || '--') + ' dBm' : '--'}
+          </span>
+          <button class="nudge-btn M" data-nid="${n.id}" onclick="doNudge(${n.id},event)" ${n.online ? '' : 'disabled style="opacity:.3;pointer-events:none"'}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Nudge
+          </button>
+          <span class="nc-relay ${rs ? 'on' : 'off'}">Relay: ${rs ? 'ON' : 'OFF'}</span>
+          <span class="nc-arrow">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </span>
+        </div>
+      `;
+        }
+        if (isNew || orderChanged) g.appendChild(c);
+      });
+    }
+
+    /* ── Show detail ───────────────────────────────────────────────── */
+    function showDetail(id) {
+      cNid = id;
+      document.body.classList.add('vDet-active');
+      $('vIdx').classList.remove('active');
+      $('vDet').classList.add('active');
+      $('backBtn').style.display = 'flex';
+      cMet = 'power';
+      initChart();
+      // Reset chart tab buttons via the single authoritative path
+      document.querySelectorAll('[data-m]').forEach(b => {
+        const active = b.dataset.m === 'power';
+        b.style.borderColor = active ? 'var(--ac)' : '';
+        b.style.color = active ? 'var(--ac)' : '';
+        b.style.background = active ? 'rgba(0,229,160,.08)' : '';
+      });
+      fetchHistory(id); fetchSys();
+      const c = NC.find(n => n.id === id); if (c) updateDetail(c);
+    }
+
+    /* ── Update detail view ────────────────────────────────────────── */
+    function updateDetail(d) {
+      if (!document.querySelector('.rename-input')) sT('detLabel', d.label || ('Node ' + d.id));
+      $('detSub').textContent = `ID: ${d.id}  •  LoRa: ${d.rssi || '--'} dBm  •  ${d.age || 0}s ago`;
+
+      const st = $('detStatus');
+      st.textContent = d.online ? 'ONLINE' : 'OFFLINE';
+      st.className = 'panel-badge M ' + (d.online ? 'ac' : 'dg');
+
+      sT('dV', (d.voltage || 0).toFixed(1));
+      sT('dI', (d.current || 0).toFixed(3));
+      sT('dP', (d.power || 0).toFixed(1));
+      if ((d.energy || 0) >= 10000) { sT('dE', ((d.energy || 0) / 1000).toFixed(2)); sT('dEu', 'kWh'); }
+      else { sT('dE', String(d.energy || 0)); sT('dEu', 'Wh'); }
+      sT('dF', (d.frequency || 0).toFixed(1));
+      sT('dPF', (d.powerFactor || 0).toFixed(2));
+
+      sB('bV', d.voltage || 0, 260); sB('bI', d.current || 0, 100); sB('bP', d.power || 0, 23000);
+      sB('bE', d.energy || 0, 50000); sB('bF', d.frequency || 0, 65); sB('bPF', d.powerFactor || 0, 1);
+
+      const al = d.alarmState || d.alarm || 0;
+      $('pwrCard').classList.toggle('alarm-card', !!al);
+      $('alarmTag').classList.toggle('show', !!al);
+
+      const rs = d.relayState !== undefined ? d.relayState : (d.relay || 0);
+      const on = rs === 1;
+      $('relayState').textContent = on ? 'ON' : 'OFF';
+      $('relayState').className = 'relay-state-val ' + (on ? 'on' : 'off') + ' M';
+      $('relayToggle').checked = on;
+      const rm = d.relayMode || 0;
+      $('relayMode').textContent = rm === 1 ? 'SCHEDULED' : 'MANUAL';
+
+      const pend = d.pending || false;
+      $('commitBanner').classList.toggle('show', pend);
+      $('commitBannerSched').classList.toggle('show', pend);
+      $('relayTabs').classList.toggle('frozen', pend);
+      $('relayInner').classList.toggle('frozen', pend);
+
+      const off = !d.online;
+      $('offlineMsg').classList.toggle('show', off);
+      $('relayCtrl').style.display = off ? 'none' : 'block';
+      $('thrCtrl').classList.toggle('frozen', off);
+      const nb = $('detNudge'); if (nb) { nb.disabled = off; nb.style.opacity = off ? '.3' : ''; nb.style.pointerEvents = off ? 'none' : ''; }
+
+      const ss = d.schedState || 0;
+      const si = $('schedInfo');
+      const schedActive = (rm === 1 && ss > 0 && d.hasSched);
+      const manTab = $('relayTabs').querySelector('[data-mode="manual"]');
+      if (manTab) manTab.classList.toggle('tab-disabled', schedActive);
+      if (schedActive) {
+        si.className = 'sched-info M show';
+        si.innerHTML = `<div><strong>Daily schedule</strong><span class="${SC[ss] || ''}">${SL[ss] || ''}</span><br>ON: ${d.schedStart || '--:--'} → OFF: ${d.schedEnd || '--:--'}</div><div class="sched-clear" onclick="doClear()">Clear</div>`;
+        setRelayTab('schedule');
+      } else { si.className = 'sched-info M'; }
+
+      const cost = ((d.energy || 0) / 1000) * costRate;
+      $('costVal').textContent = cost.toFixed(2);
+      $('costRate2').textContent = '@ ' + costRate.toFixed(2) + ' / kWh';
+      $('costEnergy').textContent = (d.energy || 0) + ' Wh';
+
+
+    }
+
+    /* ── Relay controls ────────────────────────────────────────────── */
+    function setRelayTab(m) {
+      document.querySelectorAll('#relayTabs div').forEach(t => t.classList.toggle('active', t.dataset.mode === m));
+      $('tabManual').classList.toggle('active', m === 'manual');
+      $('tabSchedule').classList.toggle('active', m === 'schedule');
+    }
+    function doManual(c) { wsSend({ cmd: 'relay_manual', node: cNid, state: c ? 1 : 0 }); $('commitBanner').classList.add('show'); }
+    function doSchedule() {
+      const sv = $('schedStart').value, ev = $('schedEnd').value;
+      if (!sv || !ev) { alert('Set both times.'); return; }
+      const [sh, sm] = sv.split(':').map(Number), [eh, em] = ev.split(':').map(Number);
+      wsSend({ cmd: 'relay_schedule', node: cNid, startH: sh, startM: sm, endH: eh, endM: em });
+      $('commitBannerSched').classList.add('show');
+    }
+    function doClear() { wsSend({ cmd: 'relay_clear', node: cNid }); $('commitBannerSched').classList.add('show'); }
+    function doSetThreshold() {
+      const v = parseInt($('thrInput').value);
+      if (!v || v < 1 || v > 23000) { alert('Enter 1–23000 W'); return; }
+      wsSend({ cmd: 'set_threshold', node: cNid, watts: v });
+      $('thrBanner').classList.add('show'); $('thrCtrl').classList.add('frozen');
+    }
+
+    /* ── Confirm dialogs ───────────────────────────────────────────── */
+    function showConfirm(id) { $(id).classList.add('show'); }
+    function hideConfirm(id) { $(id).classList.remove('show'); }
+    function execClearEnergy() { hideConfirm('cfmEnergy'); wsSend({ cmd: 'clear_energy', node: cNid }); }
+    function execClearAllEnergy() { hideConfirm('cfmAllEnergy'); wsSend({ cmd: 'clear_all_energy' }); }
+
+    /* ── Nudge ─────────────────────────────────────────────────────── */
+    function doNudge(nodeId, ev) {
+      if (ev) ev.stopPropagation();
+      wsSend({ cmd: 'nudge', node: nodeId });
+      document.querySelectorAll(`.nudge-btn[data-nid="${nodeId}"]`).forEach(btn => {
+        btn.classList.add('nudged');
+        btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Nudged';
+        clearTimeout(btn._t); btn._t = setTimeout(() => { btn.classList.remove('nudged'); btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Nudge'; }, 3000);
+      });
+      const dtBtn = $('detNudge');
+      if (dtBtn && cNid === nodeId) {
+        dtBtn.classList.add('nudged');
+        dtBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Nudged';
+        clearTimeout(dtBtn._t); dtBtn._t = setTimeout(() => { dtBtn.classList.remove('nudged'); dtBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Nudge'; }, 3000);
+      }
+    }
+
+    /* ── Cost rate ─────────────────────────────────────────────────── */
+    function setCostRate() {
+      const v = parseFloat($('costRateIn').value);
+      if (!v || v <= 0) { alert('Enter a valid rate.'); return; }
+      costRate = v; localStorage.setItem('pt-costRate', v);
+      const btn = $('costSetBtn');
+      const prev = btn.textContent;
+      btn.textContent = '✓ Saved'; btn.style.background = 'rgba(0,229,160,.15)'; btn.style.color = 'var(--ac)';
+      btn.disabled = true; clearTimeout(btn._t);
+      btn._t = setTimeout(() => { btn.textContent = prev; btn.style.background = 'var(--ac)'; btn.style.color = 'var(--bg)'; btn.disabled = false; }, 2000);
+    }
+
+    /* ── Rename ─────────────────────────────────────────────────────── */
+    function startRename() {
+      const el = $('detLabel'); if (!el) return;
+      const cur = el.textContent;
+      const inp = document.createElement('input');
+      inp.className = 'rename-input'; inp.value = cur; inp.maxLength = 29;
+      el.replaceWith(inp); inp.focus(); inp.select();
+      let done = false;
+      function commit() {
+        if (done) return; done = true;
+        const nv = inp.value.trim();
+        if (nv && nv !== cur) wsSend({ cmd: 'rename', node: cNid, name: nv });
+        const h2 = document.createElement('h2'); h2.id = 'detLabel'; h2.textContent = nv || cur;
+        h2.onclick = startRename; h2.title = 'Click to rename';
+        if (inp.isConnected) inp.replaceWith(h2);
+        else { const p = document.querySelector('.det-hdr-l'); if (p) p.prepend(h2); }
+      }
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } if (e.key === 'Escape') { inp.value = cur; commit(); } });
+      inp.addEventListener('blur', commit);
+    }
+
+    /* ── Chart ─────────────────────────────────────────────────────── */
+    function getCS(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+    function initChart() {
+      if (chart) chart.destroy();
+      const mc = MC[cMet];
+      chart = new Chart($('chartCanvas').getContext('2d'), {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: mc.l, data: [], borderColor: mc.c, backgroundColor: mc.c + '18', fill: true, tension: .35, borderWidth: 2, pointRadius: 0, pointHitRadius: 10 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: getCS('--chart-tip-bg'), borderColor: getCS('--chart-tip-bd'), borderWidth: 1,
+              titleColor: getCS('--chart-tx'), bodyColor: getCS('--chart-tx'),
+              titleFont: { family: "'JetBrains Mono'", size: 10 }, bodyFont: { family: "'JetBrains Mono'", size: 11 },
+              padding: 8, cornerRadius: 5
+            }
+          },
+          scales: {
+            x: { grid: { color: getCS('--chart-grid') }, ticks: { color: getCS('--chart-tx'), font: { family: "'JetBrains Mono'", size: 9 }, maxTicksLimit: 8 } },
+            y: { grid: { color: getCS('--chart-grid') }, ticks: { color: getCS('--chart-tx'), font: { family: "'JetBrains Mono'", size: 9 } } }
+          }
+        }
+      });
+    }
+
+    function swChart(m) {
+      cMet = m;
+      // Update tab button styles
+      document.querySelectorAll('[data-m]').forEach(b => {
+        const active = b.dataset.m === m;
+        b.style.borderColor = active ? 'var(--ac)' : '';
+        b.style.color = active ? 'var(--ac)' : '';
+        b.style.background = active ? 'rgba(0,229,160,.08)' : '';
+      });
+      const mc = MC[m];
+      chart.data.datasets[0].label = mc.l;
+      chart.data.datasets[0].borderColor = mc.c;
+      chart.data.datasets[0].backgroundColor = mc.c + '18';
+      chart.data.datasets[0].data = []; chart.data.labels = [];
+      chart.update('none'); fetchHistory(cNid);
+    }
+
+    function addChartPoint(n) {
+      if (!chart) return;
+      const mc = MC[cMet];
+      const v = n[mc.n] !== undefined ? n[mc.n] : n[mc.k];
+      if (v === undefined) return;
+      const ds = chart.data.datasets[0];
+      ds.data.push(v); chart.data.labels.push('');
+      if (ds.data.length > 120) { ds.data.shift(); chart.data.labels.shift(); }
+      chart.data.labels = ds.data.map((_, i) => { const s = (ds.data.length - 1 - i) * 3; return s > 60 ? Math.floor(s / 60) + 'm' : s + 's'; });
+      chart.update('none');
+    }
+
+    async function fetchHistory(id) {
+      try {
+        const r = await fetch('/api/node/' + id + '/history');
+        const d = await r.json();
+        if (!d.length || !chart) return;
+        const mc = MC[cMet];
+        chart.data.labels = d.map((_, i) => { const s = (d.length - 1 - i) * 3; return s > 60 ? Math.floor(s / 60) + 'm' : s + 's'; });
+        chart.data.datasets[0].data = d.map(x => x[mc.k]);
+        chart.update('none');
+      } catch (e) { }
+    }
+
+    async function fetchSys() {
+      try {
+        const r = await fetch('/api/status'); const d = await r.json();
+        sT('gwUptime', fU(d.uptime));
+        sT('gwHeap', (d.freeHeap / 1024).toFixed(0) + ' KB');
+        sT('gwRSSI', d.wifiRSSI + ' dBm');
+        sT('gwNodes', (d.nodeCount || 0) + '/' + (d.maxNodes || 8));
+        if (d.timeSet !== undefined) gwTimeSet = d.timeSet;
+        if (d.time) gwTime = d.time;
+        updGwTime();
+        if (d.version) sT('fwVer', d.version);
+      } catch (e) { }
+    }
+
+    /* ── Init ──────────────────────────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', () => {
+      applyTheme(getTheme());
+      $('costRateIn').value = costRate;
+      connectWS();
+      route();
+      setInterval(fetchSys, 10000);
+      fetchSys();
+    });
+  </script>
+</body>
+
+</html>
