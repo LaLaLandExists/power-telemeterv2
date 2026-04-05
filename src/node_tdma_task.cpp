@@ -2,7 +2,7 @@
  * node_tdma_task.cpp
  *
  * State machine:
- *   BOOT → LISTEN → CONTENDING → REGISTERED → (repeat via LISTEN each superframe)
+ *   BOOT -> LISTEN -> CONTENDING -> REGISTERED -> (repeat via LISTEN each superframe)
  *
  * Timing model:
  *   - The node records beaconReceiveTime = millis() when a beacon lands.
@@ -11,8 +11,8 @@
  *   - After TX + DL window, node returns to LISTEN on Ch 0 for the next beacon.
  *
  * Dual clock:
- *   Clock 1 (TDMA timing) — re-derived from each beacon.  µs-level discipline.
- *   Clock 2 (Schedule RTC) — free-running millis() based wall clock.
+ *   Clock 1 (TDMA timing) - re-derived from each beacon.  µs-level discipline.
+ *   Clock 2 (Schedule RTC) - free-running millis() based wall clock.
  *                             Updated only when |delta| > RTC_CORRECTION_THRESHOLD_MS.
  *
  * Relay schedule evaluation:
@@ -24,17 +24,17 @@
 #include <RadioLib.h>
 #include <PZEM004Tv30.h>
 
-// ─── Relay GPIO ──────────────────────────────────────────────────────────────
+// --- Relay GPIO --------------------------------------------------------------
 extern uint8_t RELAY_PIN;       // Defined in main.cpp (NODE_TELEMETRY build)
 extern uint8_t LED_PIN;         // Defined in main.cpp (NODE_TELEMETRY build)
 
-// ─── Radio instance (defined in main.cpp) ────────────────────────────────────
+// --- Radio instance (defined in main.cpp) ------------------------------------
 extern SX1278 radio;
 
-// ─── PZEM instance (defined in main.cpp) ─────────────────────────────────────
+// --- PZEM instance (defined in main.cpp) -------------------------------------
 extern PZEM004Tv30 pzem;
 
-// ─── Global state definitions ─────────────────────────────────────────────────
+// --- Global state definitions -------------------------------------------------
 PzemData         g_pzem        = {};
 SemaphoreHandle_t g_pzemMutex  = nullptr;
 
@@ -57,17 +57,17 @@ bool     g_rtcSet     = false;
 static uint8_t g_seqCounter  = 0;
 static int8_t  g_beaconRSSI  = -128;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Relay control
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 void setRelay(uint8_t state) {
     g_relayState = state & 1;
     digitalWrite(RELAY_PIN, g_relayState ? HIGH : LOW);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Schedule clock helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /** Set the schedule RTC from H/M/S (beacon time). */
 static void rtcSet(uint8_t h, uint8_t m, uint8_t s) {
@@ -100,12 +100,12 @@ static void rtcConditionalSync(uint8_t beaconH, uint8_t beaconM, uint8_t beaconS
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Schedule evaluation
 // Evaluates whether current RTC time falls inside the scheduled ON window.
 // Supports midnight-wrap: endH:endM < startH:startM is allowed.
 // Updates g_schedState and calls setRelay() when g_relayMode == 1.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void evaluateSchedule() {
     if (g_relayMode != 1 || g_schedState == 0) return;
 
@@ -118,7 +118,7 @@ static void evaluateSchedule() {
         // Normal window: 08:00–17:00
         inside = (nowMins >= startMins && nowMins < endMins);
     } else {
-        // Midnight-wrap: 22:00–06:00 → inside if ≥22:00 OR <06:00
+        // Midnight-wrap: 22:00–06:00 -> inside if >=22:00 OR <06:00
         inside = (nowMins >= startMins || nowMins < endMins);
     }
 
@@ -132,7 +132,7 @@ static void evaluateSchedule() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // PZEM_ENERGY_MAX_WH -- counter rolls over to 0 after this value.
 // PZEM-004T v3 display limit: 9999.99 kWh = 9,999,990 Wh.
 #define PZEM_ENERGY_MAX_WH 9999990UL
@@ -143,19 +143,19 @@ static void evaluateSchedule() {
 static uint32_t s_lastPzemEnergy    = 0;
 static bool     s_pzemEnergyBaseSet = false;
 
-// Nudge — non-blocking LED blink via task notification
-// ─────────────────────────────────────────────────────────────────────────────
+// Nudge - non-blocking LED blink via task notification
+// -----------------------------------------------------------------------------
 // nudgeTask() is a persistent task created once in nodeTdmaTaskStart(). It
 // spends its entire life blocked in ulTaskNotifyTake(), consuming no CPU.
 //
-// nudge() — called from handleDownlink() on the TDMA task (Core 1) — simply
+// nudge() - called from handleDownlink() on the TDMA task (Core 1) - simply
 // calls xTaskNotifyGive(), which is an atomic increment of a counter already
 // inside the TCB. No heap allocation, no scheduler overhead, returns in < 1 us.
 //
 // On wake, the task blinks for 3 seconds, then calls xTaskNotifyStateClear()
 // before going back to wait. This drains any notifications that arrived during
 // the blink (rapid repeated nudges), preventing a backlog of queued blinks.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static TaskHandle_t s_nudgeTaskHandle = nullptr;
 
 static void nudgeTask(void* /*params*/) {
@@ -182,9 +182,9 @@ static void nudge() {
     xTaskNotifyGive(s_nudgeTaskHandle);         // atomic; safe from any core/ISR
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Process downlink command received in DL window
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void handleDownlink(const uint8_t* buf, int16_t len) {
     if (len < 2) return;
     uint8_t type   = buf[0];
@@ -198,7 +198,7 @@ static void handleDownlink(const uint8_t* buf, int16_t len) {
             g_relayMode  = 0;       // Switch to MANUAL
             g_schedState = 0;       // Clear schedule
             setRelay(buf[2]);
-            Serial.printf("[NODE-DL] Relay manual → %s\n", buf[2] ? "ON" : "OFF");
+            Serial.printf("[NODE-DL] Relay manual -> %s\n", buf[2] ? "ON" : "OFF");
         }
         break;
 
@@ -209,7 +209,7 @@ static void handleDownlink(const uint8_t* buf, int16_t len) {
             g_schedSM   = buf[4];
             g_schedEH   = buf[5];
             g_schedEM   = buf[6];
-            g_schedState = 1;       // Start as WAITING — evaluateSchedule() will flip
+            g_schedState = 1;       // Start as WAITING - evaluateSchedule() will flip
             evaluateSchedule();
             Serial.printf("[NODE-DL] Schedule set %02d:%02d – %02d:%02d\n",
                           g_schedSH, g_schedSM, g_schedEH, g_schedEM);
@@ -235,7 +235,7 @@ static void handleDownlink(const uint8_t* buf, int16_t len) {
                 g_pzem.hasPendingThreshold = true;
                 xSemaphoreGive(g_pzemMutex);
             }
-            Serial.printf("[NODE-DL] Alarm threshold queued → %d W\n", watts);
+            Serial.printf("[NODE-DL] Alarm threshold queued -> %d W\n", watts);
         }
         break;
 
@@ -249,9 +249,9 @@ static void handleDownlink(const uint8_t* buf, int16_t len) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Build and transmit TelemetryPacket
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void transmitTelemetry() {
     TelemetryPacket pkt = {};
 
@@ -310,11 +310,11 @@ static void transmitTelemetry() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Receive with timeout helper
 // Radio must be in startReceive() before calling.
 // Returns bytes received, or -1 on timeout.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static int16_t rxWindow(uint8_t* buf, size_t maxLen, uint32_t windowMs) {
     uint32_t deadline = millis() + windowMs;
     while ((int32_t)(deadline - millis()) > 0) {
@@ -331,9 +331,9 @@ static int16_t rxWindow(uint8_t* buf, size_t maxLen, uint32_t windowMs) {
     return -1;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // TDMA node state machine
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 typedef enum { ST_LISTEN, ST_CONTENDING, ST_REGISTERED } NodeState_t;
 
 static void nodeTdmaTask(void* /*params*/) {
@@ -349,7 +349,7 @@ static void nodeTdmaTask(void* /*params*/) {
 
     while (true) {
 
-        // ── LISTEN: wait for a beacon on Ch 0 ────────────────────────────────
+        // -- LISTEN: wait for a beacon on Ch 0 --------------------------------
         if (state == ST_LISTEN || state == ST_CONTENDING || state == ST_REGISTERED) {
             // Wait up to (SUPERFRAME_MS + 200ms margin) for the next beacon
             uint8_t buf[64];
@@ -365,7 +365,7 @@ static void nodeTdmaTask(void* /*params*/) {
                 sfCount           = bcn->sfCount;
                 g_beaconRSSI      = (int8_t)radio.getRSSI();
 
-                // Update schedule RTC (conditional — see dual clock design)
+                // Update schedule RTC (conditional - see dual clock design)
                 rtcConditionalSync(bcn->hour, bcn->minute, bcn->second);
 
                 // Evaluate relay schedule
@@ -376,7 +376,7 @@ static void nodeTdmaTask(void* /*params*/) {
                     if (bcn->slotMask & (1u << (g_nodeSlotId - 1))) {
                         state = ST_REGISTERED;
                     } else {
-                        // Gateway dropped our slot (edge case — re-register)
+                        // Gateway dropped our slot (edge case - re-register)
                         g_nodeRegistered = false;
                         state = ST_CONTENDING;
                     }
@@ -385,17 +385,17 @@ static void nodeTdmaTask(void* /*params*/) {
                 }
 
             } else if (state != ST_LISTEN) {
-                // Missed beacon — go back to basic listen mode
-                Serial.println("[NODE-TDMA] Beacon timeout — re-listening");
+                // Missed beacon - go back to basic listen mode
+                Serial.println("[NODE-TDMA] Beacon timeout - re-listening");
                 state = ST_LISTEN;
                 continue;
             } else {
-                // Still in initial LISTEN and no beacon yet — retry
+                // Still in initial LISTEN and no beacon yet - retry
                 continue;
             }
         }
 
-        // ── CONTENDING: transmit join request in contention window ───────────
+        // -- CONTENDING: transmit join request in contention window -----------
         if (state == ST_CONTENDING) {
             uint32_t cwStart = beaconReceiveTime
                              + BEACON_MS
@@ -438,13 +438,13 @@ static void nodeTdmaTask(void* /*params*/) {
                 }
             }
 
-            // No ACK or UID mismatch (collision) — retry next superframe
-            Serial.println("[NODE-JOIN] No ACK — retrying next superframe");
+            // No ACK or UID mismatch (collision) - retry next superframe
+            Serial.println("[NODE-JOIN] No ACK - retrying next superframe");
             state = ST_LISTEN;
             continue;
         }
 
-        // ── REGISTERED: wait for our TX slot, transmit, listen for DL ────────
+        // -- REGISTERED: wait for our TX slot, transmit, listen for DL --------
         if (state == ST_REGISTERED) {
             // TX time = beaconReceiveTime + beacon zone + preceding slot pairs
             uint32_t txTime = beaconReceiveTime
@@ -473,11 +473,11 @@ static void nodeTdmaTask(void* /*params*/) {
 
             transmitTelemetry();
 
-            // ── DL receive window ─────────────────────────────────────────
+            // -- DL receive window -----------------------------------------
             uint32_t dlStart = txTime + SLOT_UL_MS;
             waitUntilMs(dlStart);
 
-            // Radio is now in TX idle — switch to RX
+            // Radio is now in TX idle - switch to RX
             radio.setFrequency(LORA_CHANNELS[ch]);
             radio.startReceive();
 
@@ -495,11 +495,11 @@ static void nodeTdmaTask(void* /*params*/) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // PZEM sampling task (Core 0, priority 1)
 // Continuously reads all PZEM registers every ~500 ms.
 // Stores results in g_pzem under g_pzemMutex.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void pzemTask(void* /*params*/) {
     Serial.println("[PZEM] Sampling task started on Core 0");
 
@@ -526,10 +526,10 @@ static void pzemTask(void* /*params*/) {
                 xSemaphoreGive(g_pzemMutex);
             }
         } else {
-            // PZEM read error — log and continue with cached values
+            // PZEM read error - log and continue with cached values
             static uint32_t lastErrorLog = 0;
             if (millis() - lastErrorLog > 5000) {
-                Serial.println("[PZEM] Read error — check wiring/baud");
+                Serial.println("[PZEM] Read error - check wiring/baud");
                 lastErrorLog = millis();
             }
         }
@@ -550,7 +550,7 @@ static void pzemTask(void* /*params*/) {
         }
         if (doThreshold) {
             bool ok = pzem.setPowerAlarm(threshWatts);
-            Serial.printf("[PZEM] Alarm threshold → %d W (%s)\n",
+            Serial.printf("[PZEM] Alarm threshold -> %d W (%s)\n",
                           threshWatts, ok ? "OK" : "FAIL");
         }
 
@@ -558,10 +558,10 @@ static void pzemTask(void* /*params*/) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Schedule evaluation periodic task (Core 0, low frequency)
 // Evaluates relay schedule every 10 s so the TDMA task doesn't have to.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void schedTask(void* /*params*/) {
     while (true) {
         evaluateSchedule();
@@ -569,9 +569,9 @@ static void schedTask(void* /*params*/) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Task launcher
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 void nodeTdmaTaskStart() {
     g_pzemMutex = xSemaphoreCreateMutex();
     configASSERT(g_pzemMutex);
@@ -579,16 +579,16 @@ void nodeTdmaTaskStart() {
     g_nodeUID = computeDeviceUID();
     Serial.printf("[NODE] Device UID = 0x%04X\n", g_nodeUID);
 
-    // PZEM sampling — Core 0, priority 1 (below WiFi if present)
+    // PZEM sampling - Core 0, priority 1 (below WiFi if present)
     xTaskCreatePinnedToCore(pzemTask, "PZEM", 4096, nullptr, 1, nullptr, 0);
 
-    // Schedule evaluator — Core 0, very low priority
+    // Schedule evaluator - Core 0, very low priority
     xTaskCreatePinnedToCore(schedTask, "SCHED", 2048, nullptr, 1, nullptr, 0);
 
-    // Nudge blink task — Core 0, priority 1; blocks on task notification
+    // Nudge blink task - Core 0, priority 1; blocks on task notification
     xTaskCreatePinnedToCore(nudgeTask, "NUDGE", 1024, nullptr, 1,
                             &s_nudgeTaskHandle, 0);
 
-    // TDMA radio task — Core 1, priority 2
+    // TDMA radio task - Core 1, priority 2
     xTaskCreatePinnedToCore(nodeTdmaTask, "NODE_TDMA", 8192, nullptr, 2, nullptr, 1);
 }

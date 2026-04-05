@@ -3,7 +3,7 @@
  *
  * Core TDMA engine for the gateway.
  *
- * Superframe structure (≈1845 ms total):
+ * Superframe structure (~1845 ms total):
  *   [Beacon 40 ms] [Slot-1..8 each 210 ms] [Contention UL 60 ms + DL 40 ms] [Guard 20 ms]
  *
  * Each slot pair:
@@ -24,10 +24,10 @@
 #include "gateway_web.h"          // webBroadcastTelemetry()
 #include <RadioLib.h>
 
-// ─── Radio instance (SPI pins defined in main.cpp) ───────────────────────
+// --- Radio instance (SPI pins defined in main.cpp) -----------------------
 extern SX1278 radio;
 
-// ─── Shared state definitions (extern in gateway_state.h) ───────────────────
+// --- Shared state definitions (extern in gateway_state.h) -------------------
 NodeState         g_nodes[MAX_NODES]  = {};
 SemaphoreHandle_t g_nodesMutex        = nullptr;
 uint16_t          g_sfCount           = 0;
@@ -39,9 +39,9 @@ uint32_t          g_gwTimeAt          = 0;
 bool              g_timeSet           = false;
 float             g_costPerKwh        = 12.00f;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Internal helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /** Change frequency and wait for PLL to re-lock (~500 µs). */
 static void setChannel(uint8_t ch) {
@@ -67,25 +67,25 @@ static int16_t rxWindow(uint8_t* buf, size_t maxLen, uint32_t windowMs) {
                 int16_t st = radio.readData(buf, (size_t)len);
                 if (st == RADIOLIB_ERR_NONE) return (int16_t)len;
             }
-            return -1;  // CRC error or oversized — caller restarts receive
+            return -1;  // CRC error or oversized - caller restarts receive
         }
         taskYIELD();
     }
     return -1;  // Timeout
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Energy accumulation
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void accumulateEnergy(NodeState* ns, uint32_t deltaWh) {
     // pkt.energy is now a Wh increment computed on the node, not a raw counter.
     // Rollover and power-cycle resets are handled node-side; the gateway just adds.
     ns->accumEnergy += deltaWh;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // History buffer
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void addHistory(NodeState* ns, const TelemetryPacket& pkt) {
     HistoryPoint& hp = ns->history[ns->histHead];
     hp.t = millis();
@@ -97,9 +97,9 @@ static void addHistory(NodeState* ns, const TelemetryPacket& pkt) {
     if (ns->histCount < HISTORY_MAX_POINTS) ns->histCount++;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Process a received TelemetryPacket
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void processUplink(uint8_t slotIdx, const uint8_t* buf, int16_t rssi) {
     if ((size_t)sizeof(TelemetryPacket) > MAX_NODES * 32) return; // sanity
     const TelemetryPacket* pkt = reinterpret_cast<const TelemetryPacket*>(buf);
@@ -134,7 +134,7 @@ static void processUplink(uint8_t slotIdx, const uint8_t* buf, int16_t rssi) {
         } else if (ns->queuedCmd.len >= 2 && ns->queuedCmd.data[0] == PKT_RELAY_CLEAR) {
             confirmed = (ns->relayMode == 0 && ns->schedState == 0);
         } else {
-            // Threshold, nudge — no confirmation from telemetry, rely on timeout
+            // Threshold, nudge - no confirmation from telemetry, rely on timeout
             if ((millis() - ns->pendingSentAt) >= PENDING_TIMEOUT_MS) {
                 ns->pending = false;
             }
@@ -160,9 +160,9 @@ static void processUplink(uint8_t slotIdx, const uint8_t* buf, int16_t rssi) {
         rssi);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Build beacon and transmit on Ch 0
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void sendBeacon() {
     BeaconPacket beacon;
     beacon.pktType  = PKT_BEACON;
@@ -178,10 +178,10 @@ static void sendBeacon() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Downlink TX — send queued command to node
+// -----------------------------------------------------------------------------
+// Downlink TX - send queued command to node
 // Returns true if TX succeeded.
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static bool sendDownlink(uint8_t slotIdx) {
     NodeState* ns = &g_nodes[slotIdx];
     if (!ns->queuedCmd.active || ns->queuedCmd.len == 0) return false;
@@ -201,9 +201,9 @@ static bool sendDownlink(uint8_t slotIdx) {
     return ok;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Contention window — register new nodes
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
+// Contention window - register new nodes
+// -----------------------------------------------------------------------------
 static void handleContentionWindow(uint32_t sfStart) {
     uint32_t cwStart = sfStart + BEACON_MS + (uint32_t)MAX_NODES * SLOT_PAIR_MS;
 
@@ -269,9 +269,9 @@ static void handleContentionWindow(uint32_t sfStart) {
     waitUntilMs(dlStart + CONTENTION_DL_MS);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Main TDMA task
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 static void gatewayTdmaTask(void* /*params*/) {
     Serial.println("[GW-TDMA] Task started on Core 1");
 
@@ -279,17 +279,17 @@ static void gatewayTdmaTask(void* /*params*/) {
         uint32_t sfStart = millis();
         g_sfCount++;
 
-        // ── Zone 1: Beacon ──────────────────────────────────────────────────
+        // -- Zone 1: Beacon --------------------------------------------------
         sendBeacon();
         waitUntilMs(sfStart + BEACON_MS);
 
-        // ── Zone 2: Slot pairs ──────────────────────────────────────────────
+        // -- Zone 2: Slot pairs ----------------------------------------------
         for (uint8_t s = 0; s < MAX_NODES; s++) {
             uint32_t slotBase = sfStart + BEACON_MS + (uint32_t)s * SLOT_PAIR_MS;
 
             waitUntilMs(slotBase);
 
-            // Skip unoccupied slots — advance time but don't touch radio
+            // Skip unoccupied slots - advance time but don't touch radio
             if (!(g_slotMask & (1u << s))) {
                 waitUntilMs(slotBase + SLOT_PAIR_MS);
                 continue;
@@ -299,7 +299,7 @@ static void gatewayTdmaTask(void* /*params*/) {
             uint8_t ch = hopChannel(g_sfCount, s + 1);
             setChannel(ch);
 
-            // ── UL receive window ─────────────────────────────────────────
+            // -- UL receive window -----------------------------------------
             radio.startReceive();
             uint8_t ulBuf[64];
             int16_t ulLen = rxWindow(ulBuf, sizeof(ulBuf), SLOT_UL_MS);
@@ -314,7 +314,7 @@ static void gatewayTdmaTask(void* /*params*/) {
 
             waitUntilMs(slotBase + SLOT_UL_MS);
 
-            // ── DL transmit window ────────────────────────────────────────
+            // -- DL transmit window ----------------------------------------
             // No channel change between UL and DL of the same pair.
             bool hasDL = false;
             if (xSemaphoreTake(g_nodesMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
@@ -333,22 +333,22 @@ static void gatewayTdmaTask(void* /*params*/) {
 
             waitUntilMs(slotBase + SLOT_UL_MS + SLOT_DL_MS);
 
-            // ── Intra-pair guard ──────────────────────────────────────────
+            // -- Intra-pair guard ------------------------------------------
             waitUntilMs(slotBase + SLOT_PAIR_MS);
         }
 
-        // ── Zone 3: Contention window ────────────────────────────────────────
+        // -- Zone 3: Contention window ----------------------------------------
         handleContentionWindow(sfStart);
 
-        // ── Zone 4: End guard ────────────────────────────────────────────────
+        // -- Zone 4: End guard ------------------------------------------------
         uint32_t sfEnd = sfStart + SUPERFRAME_MS;
         waitUntilMs(sfEnd);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Public API
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 void gatewayTdmaTaskStart() {
     g_nodesMutex = xSemaphoreCreateMutex();
     configASSERT(g_nodesMutex);
