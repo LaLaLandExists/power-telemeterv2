@@ -7,8 +7,9 @@
 #include <Arduino.h>
 
 /**
- * Initialize web server, mount LittleFS, load node_names.json.
- * Call from setup() after WiFi is connected.
+ * Initialize web server and register all REST + WebSocket handlers.
+ * Node labels are loaded from FRAM via framLoadAll() in main.cpp before
+ * this is called — no file I/O happens here.
  */
 void webServerSetup();
 

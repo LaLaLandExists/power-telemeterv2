@@ -65,7 +65,7 @@
 #include <ESPAsyncWebServer.h>
 
 // -- Parameters -----------------------------------------------------------------
-#define CONFIG_PIN              0           // GPIO0 / BOOT — hold LOW at power-on
+#define CONFIG_PIN              34           // GPIO34 / BOOT — hold LOW at power-on
 #define WIFI_CONNECT_TIMEOUT_MS 12000
 #define CONFIG_AP_SSID          "PowerTelemetry-Setup"
 #define FW_VERSION_STR          "v1.0.0"  // human-readable string for /api/info

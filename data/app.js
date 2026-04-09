@@ -486,7 +486,6 @@ function updNetPanel(d){
 
 /* -- WiFi config drawer ------------------------------------------ */
 let wifiSelectedSSID = '';
-let wifiSelectedSecure = true;
 let wifiPollIv = null;
 let wifiDrawerOpen = false;
 
@@ -582,8 +581,7 @@ function wifiRenderNetworks(nets) {
 function wifiSelectNetwork(ssid, secure, el) {
   document.querySelectorAll('.wifi-net-item').forEach(i => i.classList.remove('selected'));
   el.classList.add('selected');
-  wifiSelectedSSID   = ssid;
-  wifiSelectedSecure = secure;
+  wifiSelectedSSID = ssid;
   // Uncheck manual if was checked
   $('wifiManualCb').checked = false;
   wifiToggleManual();

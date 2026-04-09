@@ -3,15 +3,6 @@
  *
  * Non-blocking WiFi state machine for the Power Telemetry Gateway.
  *
- * AP is always the starting state — it is the permanent last-resort access
- * point. STA is an optional upgrade. AP turns off only while STA is connected,
- * and comes back on the moment STA drops.
- *
- * Boot flow:
- *   1. startAP() — immediately, unconditionally
- *   2. If NVS credentials exist -> beginSTA() alongside the running AP
- *   3. wifiConfigLoop() drives the rest
- *
  * State machine:
  *
  *   AP_ACTIVE ──(creds exist at boot)──► AP_STA_CONNECTING
@@ -20,15 +11,8 @@
  *       │                                       ▼
  *       └──────────────────────────── STA_CONNECTED (AP off)
  *
- * Notes:
- *   - AP is open (no password) so OS captive-portal detection fires and
- *     auto-opens a browser when a device first joins the AP.
- *   - DNS catch-all redirects all queries to 192.168.4.1 while AP is active.
- *   - The config page (/wifi_config.html) is served from LittleFS on the
- *     same AsyncWebServer as the dashboard. It is reachable on either the AP IP
- *     or the STA IP — the cfgBtn on the dashboard navigates to /wifi_config.html
- *     regardless of which interface the client is currently using.
- *   - /api/wifistatus is distinct from /api/status (dashboard gateway-info).
+ * AP is always on except while STA is actively connected.
+ * DNS catch-all redirects all queries to 192.168.4.1 while AP is active.
  */
 
 #include "gateway_wifi_config.h"
@@ -43,20 +27,21 @@
 // -- State -------------------------------------------------------------------------------------
 enum WifiState
 {
-  WIFI_STATE_AP_ACTIVE,         // AP on, no STA (waiting for provisioning or auto-reconnect)
+  WIFI_STATE_AP_ACTIVE,         // AP on, no STA
   WIFI_STATE_AP_STA_CONNECTING, // AP on + STA connecting in background
   WIFI_STATE_STA_CONNECTED,     // STA up, AP off
 };
 
-static WifiState s_state = WIFI_STATE_AP_ACTIVE;
-static uint32_t s_connectStart = 0;
-static bool s_apActive = false;
-static bool s_staConnected = false;
+static WifiState s_state        = WIFI_STATE_AP_ACTIVE;
+static uint32_t  s_connectStart = 0;
+static bool      s_apActive     = false;
+static bool      s_staConnected = false;
+static bool      s_apEventRegistered = false; // guard: register AP_START handler once
 static DNSServer s_dns;
 
 static const IPAddress AP_IP(192, 168, 4, 1);
 static const IPAddress AP_SUBNET(255, 255, 255, 0);
-static const uint8_t DNS_PORT = 53;
+static const uint8_t   DNS_PORT = 53;
 
 // -- NVS -------------------------------------------------------
 static void nvsLoad(String &ssid, String &pass)
@@ -89,14 +74,15 @@ static void nvsClear()
 static void startAP()
 {
   if (s_apActive) return;
-  // Register a one-shot event handler so MDNS.begin() fires only after
-  // ARDUINO_EVENT_WIFI_AP_START, i.e. once the AP interface is fully up
-  // and has assigned 192.168.4.1. Calling it synchronously here would race
-  // with the async AP bring-up and may bind to the wrong interface.
-  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
-    MDNS.begin("telemeter");
-    Serial.println("[WIFI] mDNS: http://telemeter.local (AP mode)");
-  }, ARDUINO_EVENT_WIFI_AP_START);
+
+  // Register mDNS-on-AP-start handler exactly once across all startAP() calls.
+  if (!s_apEventRegistered) {
+    WiFi.onEvent([](WiFiEvent_t /*event*/, WiFiEventInfo_t /*info*/) {
+      MDNS.begin("telemeter");
+      Serial.println("[WIFI] mDNS: http://telemeter.local (AP mode)");
+    }, ARDUINO_EVENT_WIFI_AP_START);
+    s_apEventRegistered = true;
+  }
 
   WiFi.enableAP(true);
   WiFi.softAPConfig(AP_IP, AP_IP, AP_SUBNET);
@@ -113,10 +99,10 @@ static void startAP()
 static void stopAP()
 {
   if (!s_apActive) return;
-  MDNS.end(); // stop AP-mode mDNS before STA-mode mDNS starts
+  MDNS.end();
   s_dns.stop();
   WiFi.softAPdisconnect(true);
-  WiFi.enableAP(false); // disable AP without touching STA
+  WiFi.enableAP(false);
   s_apActive = false;
   Serial.println("[WIFI] AP disabled — STA is up");
 }
@@ -126,13 +112,13 @@ static void beginSTA(const String &ssid, const String &pass)
 {
   WiFi.enableSTA(true);
   WiFi.setHostname("telemeter");
-  WiFi.setAutoReconnect(true); // SDK auto-reconnect on transient drops
+  WiFi.setAutoReconnect(true);
 
   if (pass.isEmpty())
     WiFi.begin(ssid.c_str());
   else
     WiFi.begin(ssid.c_str(), pass.c_str());
-  
+
   s_connectStart = millis();
   s_staConnected = false;
   Serial.printf("[WIFI] STA connecting to \"%s\" ...\n", ssid.c_str());
@@ -142,33 +128,51 @@ static void beginSTA(const String &ssid, const String &pass)
 static void handleInfo(AsyncWebServerRequest *req)
 {
   JsonDocument doc;
-  doc["version"] = FW_VERSION_STR;
-  doc["apSsid"] = CONFIG_AP_SSID;
-  doc["apIp"] = AP_IP.toString();
-  doc["apActive"] = s_apActive;
+  doc["version"]      = FW_VERSION_STR;
+  doc["apSsid"]       = CONFIG_AP_SSID;
+  doc["apIp"]         = AP_IP.toString();
+  doc["apActive"]     = s_apActive;
   doc["staConnected"] = s_staConnected;
   if (s_staConnected)
   {
     doc["staSSID"] = WiFi.SSID();
-    doc["staIP"] = WiFi.localIP().toString();
+    doc["staIP"]   = WiFi.localIP().toString();
   }
   String body;
   serializeJson(doc, body);
   req->send(200, "application/json", body);
 }
 
+// Async scan: first call triggers the scan and returns {scanning:true}.
+// Client retries until scanning:false with the full network list.
 static void handleScan(AsyncWebServerRequest *req)
 {
-  int n = WiFi.scanNetworks();
+  int n = WiFi.scanComplete();
+
+  if (n == WIFI_SCAN_FAILED)
+  {
+    WiFi.scanNetworks(/*async=*/true);
+    req->send(202, "application/json", "{\"scanning\":true,\"networks\":[]}");
+    return;
+  }
+
+  if (n == WIFI_SCAN_RUNNING)
+  {
+    req->send(202, "application/json", "{\"scanning\":true,\"networks\":[]}");
+    return;
+  }
+
   JsonDocument doc;
+  doc["scanning"] = false;
   JsonArray arr = doc["networks"].to<JsonArray>();
   for (int i = 0; i < n; i++)
   {
     JsonObject net = arr.add<JsonObject>();
-    net["ssid"] = WiFi.SSID(i);
-    net["rssi"] = WiFi.RSSI(i);
+    net["ssid"]   = WiFi.SSID(i);
+    net["rssi"]   = WiFi.RSSI(i);
     net["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
   }
+  WiFi.scanDelete();
   String body;
   serializeJson(doc, body);
   req->send(200, "application/json", body);
@@ -191,6 +195,16 @@ static void handleConnect(AsyncWebServerRequest *req)
   }
 
   nvsSave(ssid, pass);
+
+  // Restore AP before dropping STA so the device stays reachable throughout
+  // the transition — even if the new credentials fail.
+  if (s_staConnected)
+  {
+    MDNS.end();
+    s_staConnected = false;
+  }
+  startAP(); // no-op if AP is already active
+
   WiFi.disconnect(false);
   beginSTA(ssid, pass);
   s_state = WIFI_STATE_AP_STA_CONNECTING;
@@ -202,12 +216,12 @@ static void handleConnect(AsyncWebServerRequest *req)
 static void handleWifiStatus(AsyncWebServerRequest *req)
 {
   JsonDocument doc;
-  doc["apActive"] = s_apActive;
+  doc["apActive"]   = s_apActive;
   doc["connecting"] = (s_state == WIFI_STATE_AP_STA_CONNECTING);
-  doc["connected"] = s_staConnected;
+  doc["connected"]  = s_staConnected;
   if (s_staConnected)
   {
-    doc["ip"] = WiFi.localIP().toString();
+    doc["ip"]   = WiFi.localIP().toString();
     doc["ssid"] = WiFi.SSID();
     doc["rssi"] = WiFi.RSSI();
   }
@@ -218,22 +232,34 @@ static void handleWifiStatus(AsyncWebServerRequest *req)
 
 static void handleDisconnect(AsyncWebServerRequest *req)
 {
+  WiFi.setAutoReconnect(false); // make disconnect sticky
   WiFi.disconnect(false);
   s_staConnected = false;
-  if (s_state == WIFI_STATE_AP_STA_CONNECTING)
-    s_state = WIFI_STATE_AP_ACTIVE; // back to AP-only, AP already running
+
+  if (s_state == WIFI_STATE_STA_CONNECTED)
+  {
+    // AP was off — restore it so the client isn't left stranded.
+    MDNS.end();
+    startAP();
+    Serial.println("[WIFI] STA disconnected by user — AP restored");
+  }
+  else
+  {
+    Serial.println("[WIFI] STA connect attempt cancelled by user");
+  }
+
+  s_state = WIFI_STATE_AP_ACTIVE;
   req->send(200, "application/json", "{\"ok\":true}");
-  Serial.println("[WIFI] STA cancelled by user");
 }
 
 static void handleForget(AsyncWebServerRequest *req)
 {
   nvsClear();
-  WiFi.disconnect(false);
   WiFi.setAutoReconnect(false);
+  WiFi.disconnect(false);
   s_staConnected = false;
-  // Ensure AP is back on if STA was connected
-  startAP();
+  MDNS.end();
+  startAP(); // no-op if AP is already active
   s_state = WIFI_STATE_AP_ACTIVE;
   req->send(200, "application/json", "{\"ok\":true}");
   Serial.println("[WIFI] Credentials cleared — AP restored");
@@ -254,20 +280,16 @@ static void handleCatchAll(AsyncWebServerRequest *req)
 void wifiConfigBegin()
 {
   // Check force-AP pin (hold GPIO0 / BOOT button at power-on to skip saved creds)
-  pinMode(CONFIG_PIN, INPUT_PULLUP);
+  pinMode(CONFIG_PIN, INPUT);
   delay(50);
   bool forceAP = (digitalRead(CONFIG_PIN) == LOW);
   if (forceAP)
     Serial.printf("[WIFI] GPIO%d LOW — skipping saved credentials\n", CONFIG_PIN);
 
-  // -- Step 1: AP always starts immediately ----------------------------------
-  // AP is the unconditional last-resort route. It is on from the first
-  // millisecond of operation. stopAP() is only called once STA connects.
-  WiFi.mode(WIFI_AP_STA); // both interfaces active; STA can be started later
+  WiFi.mode(WIFI_AP_STA);
   startAP();
   s_state = WIFI_STATE_AP_ACTIVE;
 
-  // -- Step 2: Attempt STA if credentials are saved ---------------------------
   if (!forceAP)
   {
     String ssid, pass;
@@ -282,22 +304,16 @@ void wifiConfigBegin()
       Serial.println("[WIFI] No saved credentials — staying in AP mode");
     }
   }
-  // Returns immediately in all cases. loop() drives the rest.
 }
 
 void wifiRegisterRoutes(AsyncWebServer &server)
 {
-  // WiFi config API - all distinct from dashboard /api/* routes
-  server.on("/api/info", HTTP_GET, handleInfo);
-  server.on("/api/scan", HTTP_GET, handleScan);
-  server.on("/api/connect", HTTP_POST, handleConnect);
-  server.on("/api/wifistatus", HTTP_GET, handleWifiStatus);
-  server.on("/api/disconnect", HTTP_GET, handleDisconnect);
-  server.on("/api/forget", HTTP_GET, handleForget);
-
-  // Captive-portal catch-all (must be last — registered via onNotFound in gateway_web.cpp)
-  // gateway_web.cpp calls wifiRegisterRoutes() then sets its own onNotFound;
-  // handleCatchAll is stored here and invoked from gateway_web's onNotFound handler.
+  server.on("/api/info",       HTTP_GET,  handleInfo);
+  server.on("/api/scan",       HTTP_GET,  handleScan);
+  server.on("/api/connect",    HTTP_POST, handleConnect);
+  server.on("/api/wifistatus", HTTP_GET,  handleWifiStatus);
+  server.on("/api/disconnect", HTTP_GET,  handleDisconnect);
+  server.on("/api/forget",     HTTP_GET,  handleForget);
   Serial.println("[WIFI] Config routes registered");
 }
 
@@ -311,9 +327,9 @@ void wifiConfigLoop()
     if (WiFi.status() == WL_CONNECTED)
     {
       s_staConnected = true;
-      stopAP(); // STA is up — AP no longer needed
+      stopAP(); // stopAP() calls MDNS.end()
       s_state = WIFI_STATE_STA_CONNECTED;
-      MDNS.begin("telemeter"); // telemeter.local
+      MDNS.begin("telemeter");
       Serial.printf("[WIFI] STA connected | IP: %s | RSSI: %d dBm\n",
                     WiFi.localIP().toString().c_str(), WiFi.RSSI());
       Serial.println("[WIFI] mDNS: http://telemeter.local");
@@ -322,31 +338,31 @@ void wifiConfigLoop()
     {
       Serial.println("[WIFI] STA timed out - staying in AP mode");
       WiFi.disconnect(false);
-      s_state = WIFI_STATE_AP_ACTIVE; // AP is still running, nothing else to do
+      s_state = WIFI_STATE_AP_ACTIVE;
     }
     break;
 
   case WIFI_STATE_STA_CONNECTED:
     if (WiFi.status() != WL_CONNECTED)
     {
-      // Runtime drop — bring AP back as immediate fallback
       s_staConnected = false;
-      startAP(); // stopAP not needed — STA dropped, AP was already off
+      MDNS.end();
+      startAP();
       s_state = WIFI_STATE_AP_ACTIVE;
       Serial.println("[WIFI] STA dropped - AP restored as fallback");
-      // WiFi.setAutoReconnect(true) means SDK will attempt to reconnect;
-      // loop will catch it in AP_ACTIVE and promote to STA_CONNECTED.
+      // setAutoReconnect(true) is still set; SDK will reconnect in background
+      // and AP_ACTIVE case below will promote back to STA_CONNECTED.
     }
     break;
 
   case WIFI_STATE_AP_ACTIVE:
-    // SDK auto-reconnect may re-establish STA (e.g., after router reboot)
+    // SDK auto-reconnect may silently re-establish STA (e.g. after router reboot).
     if (WiFi.status() == WL_CONNECTED)
     {
       s_staConnected = true;
-      stopAP();
+      stopAP(); // stopAP() calls MDNS.end()
       s_state = WIFI_STATE_STA_CONNECTED;
-      MDNS.begin("telemeter"); // telemeter.local
+      MDNS.begin("telemeter");
       Serial.printf("[WIFI] Auto-reconnected | IP: %s\n",
                     WiFi.localIP().toString().c_str());
       Serial.println("[WIFI] mDNS: http://telemeter.local");
@@ -355,8 +371,7 @@ void wifiConfigLoop()
   }
 }
 
-bool wifiIsApActive() { return s_apActive; }
+bool wifiIsApActive()     { return s_apActive; }
 bool wifiIsStaConnected() { return s_staConnected; }
 
-// Exposed so gateway_web.cpp's onNotFound can invoke the captive redirect
 void wifiHandleCatchAll(AsyncWebServerRequest *req) { handleCatchAll(req); }

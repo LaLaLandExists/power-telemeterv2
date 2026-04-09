@@ -25,6 +25,7 @@
 #include "gateway_state.h"
 #include "gateway_tdma_task.h"
 #include "gateway_wifi_config.h"
+#include "fram_store.h"
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include <LittleFS.h>
@@ -88,11 +89,6 @@ static void nodeToDetailJson(JsonObject obj, const NodeState &ns)
     obj["schedEnd"] = schedEnd;
   }
 
-  // Cost calculation
-  float cost = (float)ns.accumEnergy / 1000.0f * g_costPerKwh;
-  obj["energyCost"] = roundf(cost * 100.0f) / 100.0f;
-  obj["costPerKwh"] = g_costPerKwh;
-
   // Gateway clock status
   char timeBuf[9];
   gwTimeString(timeBuf);
@@ -112,97 +108,6 @@ static int parseNodeIdFromPath(const String &path)
   if (second < 0)
     return -1;
   return path.substring(first + 1, second).toInt();
-}
-
-// -----------------------------------------------------------------------------
-// LittleFS — node name persistence
-// -----------------------------------------------------------------------------
-
-static void saveNodeNames()
-{
-  JsonDocument doc;
-  if (xSemaphoreTake(g_nodesMutex, pdMS_TO_TICKS(20)) == pdTRUE)
-  {
-    for (uint8_t i = 0; i < MAX_NODES; i++)
-    {
-      if (g_nodes[i].active)
-      {
-        doc[String(g_nodes[i].slotId)] = g_nodes[i].label;
-      }
-    }
-    xSemaphoreGive(g_nodesMutex);
-  }
-  File f = LittleFS.open("/node_names.json", "w");
-  if (!f)
-  {
-    // First attempt failed. LFS_ERR_NOPERM can occur if a prior partial
-    // write left a corrupt inode. Remove and retry once.
-    Serial.println("[WEB] WARN: node_names.json open failed, removing and retrying");
-    LittleFS.remove("/node_names.json");
-    f = LittleFS.open("/node_names.json", "w");
-  }
-  if (f)
-  {
-    serializeJson(doc, f);
-    f.close();
-  }
-  else
-  {
-    Serial.println("[WEB] ERROR: could not save node_names.json after retry");
-  }
-}
-
-static void loadNodeNames()
-{
-  if (!LittleFS.exists("/node_names.json"))
-  {
-    // File does not exist yet (fresh filesystem) — create it now with an
-    // empty object so subsequent saveNodeNames() calls never need to create
-    // a new file. LittleFS LFS_ERR_NOPERM on create can occur when a prior
-    // partial write / power-cycle left a corrupt inode at the path.
-    File f = LittleFS.open("/node_names.json", "w");
-    if (f)
-    {
-      f.print("{}");
-      f.close();
-    }
-    else
-    {
-      Serial.println("[WEB] WARN: could not create node_names.json");
-    }
-    return; // nothing to load
-  }
-
-  File f = LittleFS.open("/node_names.json", "r");
-  if (!f)
-  {
-    Serial.println("[WEB] WARN: could not open node_names.json for read");
-    return;
-  }
-
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, f);
-  f.close();
-  if (err)
-  {
-    Serial.printf("[WEB] WARN: node_names.json parse error: %s\n", err.c_str());
-    return;
-  }
-
-  // Pre-populate labels so they're ready when nodes join
-  // (nodes may have been registered in a previous session)
-  for (JsonPair kv : doc.as<JsonObject>())
-  {
-    int id = String(kv.key().c_str()).toInt();
-    if (id < 1 || id > MAX_NODES)
-      continue;
-    int idx = id - 1;
-    // Only set label - active flag is set when the node actually joins
-    // Sets g_nodes[idx].label <- Json value
-    strlcpy(g_nodes[idx].label, kv.value().as<const char *>(),
-            sizeof(g_nodes[idx].label));
-  }
-  Serial.println("[WEB] Loaded node_names.json");
 }
 
 // -----------------------------------------------------------------------------
@@ -247,7 +152,7 @@ static void wsSendToClient(AsyncWebSocketClient *client, const JsonDocument &doc
 
 // ---------------------------------------------------------------------------------
 // Shared nodes-list document builder
-// Populates doc with {type:"nodes", nodes:[...], count, costPerKwh, timeSet, time}.
+// Populates doc with {type:"nodes", nodes:[...], count, timeSet, time}.
 // Used by get_nodes command, WS_EVT_CONNECT, and webBroadcastAllNodes().
 static void buildNodesDoc(JsonDocument &doc)
 {
@@ -270,7 +175,6 @@ static void buildNodesDoc(JsonDocument &doc)
   char timeBuf[9];
   gwTimeString(timeBuf);
   doc["count"] = count;
-  doc["costPerKwh"] = g_costPerKwh;
   doc["timeSet"] = g_timeSet;
   doc["time"] = timeBuf;
 }
@@ -396,7 +300,7 @@ static void handleWsMessage(AsyncWebSocketClient *client, const String &payload)
         strlcpy(g_nodes[idx].label, name, sizeof(g_nodes[idx].label));
         xSemaphoreGive(g_nodesMutex);
       }
-      saveNodeNames();
+      framSaveLabel(idx);
       // Broadcast name_changed to ALL clients
       JsonDocument bcast;
       bcast["type"] = "name_changed";
@@ -536,7 +440,6 @@ static void handleGetNodes(AsyncWebServerRequest *req)
   char timeBuf[9];
   gwTimeString(timeBuf);
   doc["count"] = count;
-  doc["costPerKwh"] = g_costPerKwh;
   doc["timeSet"] = g_timeSet;
   doc["time"] = timeBuf;
 
@@ -664,7 +567,7 @@ static void handlePostNodeName(AsyncWebServerRequest *req)
     strlcpy(g_nodes[idx].label, name.c_str(), sizeof(g_nodes[idx].label));
     xSemaphoreGive(g_nodesMutex);
   }
-  saveNodeNames();
+  framSaveLabel(idx);
 
   JsonDocument bcast;
   bcast["type"] = "name_changed";
@@ -722,7 +625,10 @@ static void handleGetStatus(AsyncWebServerRequest *req)
   doc["wsClients"] = ws.count();
   doc["timeSet"] = g_timeSet;
   doc["time"] = timeBuf;
-  doc["apActive"] = wifiIsApActive(); // true when AP is on (STA unavailable)
+  doc["apActive"] = wifiIsApActive();
+  doc["version"]  = FW_VERSION_STR;
+  doc["wifiMode"] = wifiIsApActive() ? "ap" : "sta";
+  doc["ssid"]     = wifiIsApActive() ? CONFIG_AP_SSID : WiFi.SSID();
 
   String json;
   serializeJson(doc, json);
@@ -758,9 +664,6 @@ void webBroadcastAllNodes()
 // -----------------------------------------------------------------------------
 void webServerSetup()
 {
-  // Load persisted node names
-  loadNodeNames();
-
   // WebSocket handler
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);

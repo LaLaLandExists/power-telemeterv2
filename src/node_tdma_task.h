@@ -8,20 +8,20 @@
 
 // --- PZEM data shared between the PZEM task and the TDMA task ----------------
 struct PzemData {
-    float    voltage;       // V
-    float    current;       // A
-    float    power;         // W
-    uint32_t energy;        // Wh (raw from PZEM register × scale)
-    float    frequency;     // Hz
-    float    powerFactor;   // 0.00–1.00
-    uint16_t alarmThreshold; // watts, last value written to PZEM
-    bool     valid;          // At least one successful read
-    uint32_t readAt;         // millis() of last successful read
+  float    voltage;       // V
+  float    current;       // A
+  float    power;         // W
+  uint32_t energy;        // Wh (raw from PZEM register × scale)
+  float    frequency;     // Hz
+  float    powerFactor;   // 0.00–1.00
+  uint16_t alarmThreshold; // watts, last value written to PZEM
+  bool     valid;          // At least one successful read
+  uint32_t readAt;         // millis() of last successful read
 
-    // Pending threshold write - set by TDMA task, consumed by pzemTask.
-    // Both fields are protected by g_pzemMutex.
-    uint16_t pendingThresholdW;    // Watts to write (valid when hasPendingThreshold)
-    bool     hasPendingThreshold;  // true = pzemTask should write threshold on next cycle
+  // Pending threshold write - set by TDMA task, consumed by pzemTask.
+  // Both fields are protected by g_pzemMutex.
+  uint16_t pendingThresholdW;    // Watts to write (valid when hasPendingThreshold)
+  bool     hasPendingThreshold;  // true = pzemTask should write threshold on next cycle
 };
 
 extern PzemData         g_pzem;
@@ -46,8 +46,8 @@ extern bool     g_rtcSet;
 
 /** Get current RTC time in seconds-since-midnight. */
 inline uint32_t rtcGetSec() {
-    if (!g_rtcSet) return 0;
-    return (g_rtcBaseSec + (millis() - g_rtcBaseMs) / 1000UL) % 86400UL;
+  if (!g_rtcSet) return 0;
+  return (g_rtcBaseSec + (millis() - g_rtcBaseMs) / 1000UL) % 86400UL;
 }
 
 /**
