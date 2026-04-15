@@ -1,0 +1,5 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "ESP32_Footprints") (type "KiCad") (uri "${KIPRJMOD}/ESP32_Footprints.pretty") (options "") (descr ""))
+	(lib (name "LoRa_Breakout") (type "KiCad") (uri "${KIPRJMOD}/LoRa_Breakout.pretty") (options "") (descr ""))
+)

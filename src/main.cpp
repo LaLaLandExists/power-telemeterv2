@@ -45,10 +45,10 @@
  * -- Hardware ------------------------------------------------------------------
  *
  *   SX1278 (VSPI - identical on both roles):
- *     NSS  -> GPIO5    SCK  -> GPIO18
- *     MISO -> GPIO19   MOSI -> GPIO23
+ *     NSS  -> GPIO5    SCK  -> GPIO22
+ *     MISO -> GPIO19   MOSI -> GPIO18
  *     DIO0 -> GPIO26   RST  -> GPIO14
- *     DIO1 -> GPIO35 (tie to GND if unused)
+ *     DIO1 -> GPIO25 (tie to GND if unused)
  *
  *   Gateway only:
  *     WiFi + LittleFS (index.html + wifi_config.html in data/ folder)
@@ -100,7 +100,10 @@
 #define LORA_PIN_NSS    5
 #define LORA_PIN_DIO0   26
 #define LORA_PIN_RST    14
-#define LORA_PIN_DIO1   35   // Tie to GND if unused
+#define LORA_PIN_DIO1   25   // Tie to GND if unused
+#define LORA_PIN_SCK    22   // Remapped from GPIO18 (routing)
+#define LORA_PIN_MISO   19
+#define LORA_PIN_MOSI   18
 
 // --- Role-specific pin definitions -------------------------------------------
 #ifdef NODE_TELEMETRY
@@ -169,6 +172,7 @@ void setup() {
   wifiConfigBegin();
 
   // -- SX1278 radio ----------------------------------------------------------
+  SPI.begin(LORA_PIN_SCK, LORA_PIN_MISO, LORA_PIN_MOSI, LORA_PIN_NSS);
   Serial.print("[LORA] Initialising SX1278 ... ");
   int16_t loraState = radio.begin(
     LORA_CHANNELS[0],   // Ch 0 - beacon channel
@@ -232,6 +236,7 @@ void setup() {
   digitalWrite(LED_PIN_, LOW);
 
   // -- SX1278 radio ----------------------------------------------------------
+  SPI.begin(LORA_PIN_SCK, LORA_PIN_MISO, LORA_PIN_MOSI, LORA_PIN_NSS);
   Serial.print("[LORA] Initialising SX1278 ... ");
   int16_t loraState = radio.begin(
     LORA_CHANNELS[0],   // Ch 0 - listen for beacon
