@@ -92,7 +92,9 @@
 #endif
 
 #ifdef NODE_TELEMETRY
+  #ifndef PZEM_FAKE
   #include <PZEM004Tv30.h>
+  #endif
   #include "node_tdma_task.h"
 #endif
 
@@ -109,12 +111,14 @@
 #ifdef NODE_TELEMETRY
   #define PZEM_RX_PIN  16   // ESP32 RX2 <- PZEM TX
   #define PZEM_TX_PIN  17   // ESP32 TX2 -> PZEM RX
-  #define RELAY_PIN_    4   // Relay signal (active HIGH)
-  #define LED_PIN_      2   // Built-in LED
+  #define RELAY_PIN_      4   // Relay signal (active HIGH)
+  #define LED_GREEN_PIN_  2   // Two-color LED - green channel (built-in LED pin)
+  #define LED_RED_PIN_   12   // Two-color LED - red channel
 
   // Exported - referenced by node_tdma_task.cpp
-  uint8_t RELAY_PIN = RELAY_PIN_;
-  uint8_t LED_PIN   = LED_PIN_;
+  uint8_t RELAY_PIN     = RELAY_PIN_;
+  uint8_t LED_GREEN_PIN = LED_GREEN_PIN_;
+  uint8_t LED_RED_PIN   = LED_RED_PIN_;
 #endif
 
 // --- Hardware instances -------------------------------------------------------
@@ -122,8 +126,10 @@
 SX1278 radio = new Module(LORA_PIN_NSS, LORA_PIN_DIO0, LORA_PIN_RST, LORA_PIN_DIO1);
 
 #ifdef NODE_TELEMETRY
+  #ifndef PZEM_FAKE
   // PZEM-004T v3 on Serial2 - extern-referenced by node_tdma_task.cpp
   PZEM004Tv30 pzem(Serial2, PZEM_RX_PIN, PZEM_TX_PIN);
+  #endif
 #endif
 
 // =============================================================================
@@ -223,17 +229,21 @@ void setup() {
   Serial.println("\n===== Power Telemetry Node =====");
 
   // -- GPIO init -------------------------------------------------------------
-  pinMode(RELAY_PIN_, OUTPUT);
-  digitalWrite(RELAY_PIN_, LOW);   // Relay OFF at boot
-  pinMode(LED_PIN_,   OUTPUT);
-  digitalWrite(LED_PIN_,   LOW);
+#ifndef PZEM_FAKE
+  pinMode(RELAY_PIN_,      OUTPUT);
+  digitalWrite(RELAY_PIN_, LOW);       // Relay OFF at boot
+#endif
+  pinMode(LED_GREEN_PIN_, OUTPUT);
+  digitalWrite(LED_GREEN_PIN_, LOW);
+  pinMode(LED_RED_PIN_,   OUTPUT);
+  digitalWrite(LED_RED_PIN_,   LOW);
 
-  // 3 fast blinks - boot indicator
+  // 3 fast green blinks - boot indicator
   for (int i = 0; i < 6; i++) {
-    digitalWrite(LED_PIN_, i & 1);
+    digitalWrite(LED_GREEN_PIN_, i & 1);
     delay(120);
   }
-  digitalWrite(LED_PIN_, LOW);
+  digitalWrite(LED_GREEN_PIN_, LOW);
 
   // -- SX1278 radio ----------------------------------------------------------
   SPI.begin(LORA_PIN_SCK, LORA_PIN_MISO, LORA_PIN_MOSI, LORA_PIN_NSS);
@@ -255,6 +265,9 @@ void setup() {
   radio.setCRC(true);
 
   // -- PZEM sanity check -----------------------------------------------------
+#ifdef PZEM_FAKE
+  Serial.println("[PZEM-FAKE] Net-test mode — skipping PZEM hardware check");
+#else
   Serial.print("[PZEM] Checking connection ... ");
   delay(200);
   float testV = pzem.voltage();
@@ -264,6 +277,7 @@ void setup() {
     Serial.println("No response - check wiring (TX/RX swapped?)");
     // pzemTask will keep retrying - non-fatal
   }
+#endif
 
   // -- Launch FreeRTOS tasks -------------------------------------------------
   nodeTdmaTaskStart();

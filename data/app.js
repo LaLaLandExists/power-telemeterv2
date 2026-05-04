@@ -542,13 +542,22 @@ function wifiDoScan() {
   btn.classList.add('spinning');
   btn.disabled = true;
   list.innerHTML = '<div style="text-align:center;padding:18px 0;color:var(--txd);font-size:11px;font-family:monospace">Scanning…</div>';
-  fetch('/api/scan')
-    .then(r => r.json())
-    .then(d => wifiRenderNetworks(d.networks || []))
-    .catch(() => {
-      list.innerHTML = '<div style="text-align:center;padding:18px 0;color:var(--dg);font-size:11px;font-family:monospace">Scan failed — check connection</div>';
-    })
-    .finally(() => { btn.classList.remove('spinning'); btn.disabled = false; });
+  function poll() {
+    fetch('/api/scan')
+      .then(r => r.json())
+      .then(d => {
+        if (d.scanning) { setTimeout(poll, 800); return; }
+        btn.classList.remove('spinning');
+        btn.disabled = false;
+        wifiRenderNetworks(d.networks || []);
+      })
+      .catch(() => {
+        list.innerHTML = '<div style="text-align:center;padding:18px 0;color:var(--dg);font-size:11px;font-family:monospace">Scan failed — check connection</div>';
+        btn.classList.remove('spinning');
+        btn.disabled = false;
+      });
+  }
+  poll();
 }
 
 function wifiRenderNetworks(nets) {

@@ -75,7 +75,7 @@ static int16_t rxWindow(uint8_t* buf, size_t maxLen, uint32_t windowMs) {
       }
       return -1;  // CRC error or oversized - caller restarts receive
     }
-    taskYIELD();
+    vTaskDelay(pdMS_TO_TICKS(1));  // block so lower-priority tasks (loop/WiFi) can run
   }
   return -1;  // Timeout
 }

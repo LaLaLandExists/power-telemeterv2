@@ -252,6 +252,11 @@ inline uint16_t computeDeviceUID() {
 // Safe for 32-bit millis() rollover as long as gap < 2^31 ms.
 // -----------------------------------------------------------------------------
 inline void waitUntilMs(uint32_t target) {
+  // Block (yields to lower-priority tasks) until within 2 ms of target,
+  // then spin for the final stretch to preserve sub-millisecond precision.
+  while ((int32_t)(target - millis()) > 2) {
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
   while ((int32_t)(target - millis()) > 0) {
     taskYIELD();
   }

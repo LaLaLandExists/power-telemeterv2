@@ -23,17 +23,25 @@
 #include "node_tdma_task.h"
 #include "log_async.h"
 #include <RadioLib.h>
+#ifndef PZEM_FAKE
 #include <PZEM004Tv30.h>
+#endif
+#ifdef PZEM_FAKE
+#include "node_fake_pzem.h"
+#endif
 
-// --- Relay GPIO --------------------------------------------------------------
+// --- Relay / LED GPIO --------------------------------------------------------
 extern uint8_t RELAY_PIN;       // Defined in main.cpp (NODE_TELEMETRY build)
-extern uint8_t LED_PIN;         // Defined in main.cpp (NODE_TELEMETRY build)
+extern uint8_t LED_GREEN_PIN;   // Defined in main.cpp (NODE_TELEMETRY build)
+extern uint8_t LED_RED_PIN;     // Defined in main.cpp (NODE_TELEMETRY build)
 
 // --- Radio instance (defined in main.cpp) ------------------------------------
 extern SX1278 radio;
 
 // --- PZEM instance (defined in main.cpp) -------------------------------------
+#ifndef PZEM_FAKE
 extern PZEM004Tv30 pzem;
+#endif
 
 // --- Global state definitions -------------------------------------------------
 PzemData         g_pzem        = {};
@@ -63,7 +71,9 @@ static int8_t  g_beaconRSSI  = -128;
 // -----------------------------------------------------------------------------
 void setRelay(uint8_t state) {
   g_relayState = state & 1;
+#ifndef PZEM_FAKE
   digitalWrite(RELAY_PIN, g_relayState ? HIGH : LOW);
+#endif
 }
 
 // -----------------------------------------------------------------------------
@@ -144,43 +154,85 @@ static void evaluateSchedule() {
 static uint32_t s_lastPzemEnergy    = 0;
 static bool     s_pzemEnergyBaseSet = false;
 
-// Nudge - non-blocking LED blink via task notification
+// LED state indicator + nudge override
 // -----------------------------------------------------------------------------
-// nudgeTask() is a persistent task created once in nodeTdmaTaskStart(). It
-// spends its entire life blocked in ulTaskNotifyTake(), consuming no CPU.
+// A two-color LED (red=LED_RED_PIN, green=LED_GREEN_PIN) provides a persistent
+// visual readout of the node's TDMA state:
 //
-// nudge() - called from handleDownlink() on the TDMA task (Core 1) - simply
-// calls xTaskNotifyGive(), which is an atomic increment of a counter already
-// inside the TCB. No heap allocation, no scheduler overhead, returns in < 1 us.
+//   ST_LISTEN      -> yellow slow blink  (500 ms on / 500 ms off)
+//   ST_CONTENDING  -> yellow fast blink  (125 ms on / 125 ms off)
+//   ST_REGISTERED  -> green heartbeat    ( 50 ms on / 1800 ms off)
 //
-// On wake, the task blinks for 3 seconds, then calls xTaskNotifyStateClear()
-// before going back to wait. This drains any notifications that arrived during
-// the blink (rapid repeated nudges), preventing a backlog of queued blinks.
+// PKT_NUDGE overrides all state patterns with a 3 s red rapid-blink
+// (100 ms on/off), then reverts to the current TDMA state pattern.
+//
+// ledTask() lives on Core 0 (priority 1) and uses ulTaskNotifyTake() as both
+// the nudge wakeup mechanism and a yield-aware timer for LED off-periods.
+// This means a nudge interrupts even the 1800 ms REGISTERED off-time within
+// one notification-check interval.
+//
+// triggerNudge() - called from handleDownlink() on the TDMA task (Core 1) -
+// calls xTaskNotifyGive(), which is an atomic TCB counter increment.
+// No heap allocation, no scheduler overhead, returns in < 1 us.
 // -----------------------------------------------------------------------------
-static TaskHandle_t s_nudgeTaskHandle = nullptr;
 
-static void nudgeTask(void* /*params*/) {
+typedef enum { LED_MODE_LISTEN, LED_MODE_CONTENDING, LED_MODE_REGISTERED } LedTdmaMode_t;
+
+static volatile LedTdmaMode_t s_tdmaLedMode = LED_MODE_LISTEN;
+static TaskHandle_t           s_ledTaskHandle = nullptr;
+
+static void setLed(bool red, bool green) {
+  digitalWrite(LED_RED_PIN,   red   ? HIGH : LOW);
+  digitalWrite(LED_GREEN_PIN, green ? HIGH : LOW);
+}
+
+static void ledTask(void* /*params*/) {
   while (true) {
-    // Block indefinitely until nudge() sends a notification
-    ulTaskNotifyTake(pdTRUE,          // clear notification count to 0 on wake
-                      portMAX_DELAY);  // wait forever
+    bool nudged = (ulTaskNotifyTake(pdTRUE, 0) > 0);
 
-    Serial.println("[NODE] Nudge!");
-    for (int i = 0; i < 30; i++) {
-      digitalWrite(LED_PIN, i & 1);
-      vTaskDelay(pdMS_TO_TICKS(100));
+    if (!nudged) {
+      switch (s_tdmaLedMode) {
+      case LED_MODE_LISTEN:
+        // Yellow slow blink - searching for beacon
+        setLed(true, true);
+        nudged = (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500)) > 0);
+        setLed(false, false);
+        if (!nudged) nudged = (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500)) > 0);
+        break;
+
+      case LED_MODE_CONTENDING:
+        // Yellow fast blink - join attempt in progress
+        setLed(true, true);
+        nudged = (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(125)) > 0);
+        setLed(false, false);
+        if (!nudged) nudged = (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(125)) > 0);
+        break;
+
+      case LED_MODE_REGISTERED:
+        // Heartbeat: green = relay OFF, yellow = relay ON (load energized)
+        setLed(g_relayState, true);
+        nudged = (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50)) > 0);
+        setLed(false, false);
+        if (!nudged) nudged = (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1800)) > 0);
+        break;
+      }
     }
-    digitalWrite(LED_PIN, LOW);
 
-    // Drain any notifications that stacked up while we were blinking.
-    // Without this, rapid nudge commands would queue up and blink N times.
-    xTaskNotifyStateClear(nullptr);   // nullptr = clear own notification
+    if (nudged) {
+      logAsync("[NODE] Nudge!\n");
+      for (int i = 0; i < 30; i++) {
+        setLed(i & 1, false);         // red rapid blink
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+      setLed(false, false);
+      xTaskNotifyStateClear(nullptr); // drain stacked notifications
+    }
   }
 }
 
-static void nudge() {
-  if (s_nudgeTaskHandle == nullptr) return;   // task not yet created
-  xTaskNotifyGive(s_nudgeTaskHandle);         // atomic; safe from any core/ISR
+static void triggerNudge() {
+  if (s_ledTaskHandle == nullptr) return;
+  xTaskNotifyGive(s_ledTaskHandle);   // atomic; safe from any core/ISR
 }
 
 // -----------------------------------------------------------------------------
@@ -241,7 +293,7 @@ static void handleDownlink(const uint8_t* buf, int16_t len) {
     break;
 
   case PKT_NUDGE:          // 2 bytes: type, nodeId
-    nudge();
+    triggerNudge();
     break;
 
   default:
@@ -376,19 +428,23 @@ static void nodeTdmaTask(void* /*params*/) {
           // Verify our slot is still in the mask
           if (bcn->slotMask & (1u << (g_nodeSlotId - 1))) {
             state = ST_REGISTERED;
+            s_tdmaLedMode = LED_MODE_REGISTERED;
           } else {
             // Gateway dropped our slot (edge case - re-register)
             g_nodeRegistered = false;
             state = ST_CONTENDING;
+            s_tdmaLedMode = LED_MODE_CONTENDING;
           }
         } else {
           state = ST_CONTENDING;
+          s_tdmaLedMode = LED_MODE_CONTENDING;
         }
 
       } else if (state != ST_LISTEN) {
         // Missed beacon - go back to basic listen mode
         logAsync("[NODE-TDMA] Beacon timeout - re-listening\n");
         state = ST_LISTEN;
+        if (!g_nodeRegistered) s_tdmaLedMode = LED_MODE_LISTEN;
         continue;
       } else {
         // Still in initial LISTEN and no beacon yet - retry
@@ -442,6 +498,7 @@ static void nodeTdmaTask(void* /*params*/) {
       // No ACK or UID mismatch (collision) - retry next superframe
       logAsync("[NODE-JOIN] No ACK - retrying next superframe\n");
       state = ST_LISTEN;
+      s_tdmaLedMode = LED_MODE_LISTEN;
       continue;
     }
 
@@ -501,6 +558,7 @@ static void nodeTdmaTask(void* /*params*/) {
 // Continuously reads all PZEM registers every ~500 ms.
 // Stores results in g_pzem under g_pzemMutex.
 // -----------------------------------------------------------------------------
+#ifndef PZEM_FAKE
 static void pzemTask(void* /*params*/) {
   Serial.println("[PZEM] Sampling task started on Core 0");
 
@@ -558,6 +616,7 @@ static void pzemTask(void* /*params*/) {
     vTaskDelay(500 / portTICK_PERIOD_MS);
   }
 }
+#endif // !PZEM_FAKE
 
 // -----------------------------------------------------------------------------
 // Schedule evaluation periodic task (Core 0, low frequency)
@@ -581,14 +640,18 @@ void nodeTdmaTaskStart() {
   Serial.printf("[NODE] Device UID = 0x%04X\n", g_nodeUID);
 
   // PZEM sampling - Core 0, priority 1 (below WiFi if present)
-  xTaskCreatePinnedToCore(pzemTask, "PZEM", 4096, nullptr, 1, nullptr, 0);
+#ifdef PZEM_FAKE
+  xTaskCreatePinnedToCore(fakePzemTask, "PZEM", 4096, nullptr, 1, nullptr, 0);
+#else
+  xTaskCreatePinnedToCore(pzemTask,     "PZEM", 4096, nullptr, 1, nullptr, 0);
+#endif
 
   // Schedule evaluator - Core 0, very low priority
   xTaskCreatePinnedToCore(schedTask, "SCHED", 2048, nullptr, 1, nullptr, 0);
 
-  // Nudge blink task - Core 0, priority 1; blocks on task notification
-  xTaskCreatePinnedToCore(nudgeTask, "NUDGE", 1024, nullptr, 1,
-                          &s_nudgeTaskHandle, 0);
+  // LED state + nudge task - Core 0, priority 1; drives two-color state LED
+  xTaskCreatePinnedToCore(ledTask, "LED", 1024, nullptr, 1,
+                          &s_ledTaskHandle, 0);
 
   // TDMA radio task - Core 1, priority 2
   xTaskCreatePinnedToCore(nodeTdmaTask, "NODE_TDMA", 8192, nullptr, 2, nullptr, 1);
