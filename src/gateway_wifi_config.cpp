@@ -5,11 +5,11 @@
  *
  * State machine:
  *
- *   AP_ACTIVE ──(creds exist at boot)──► AP_STA_CONNECTING
- *       ▲                                       │
- *       │ STA drops / timeout / forget          │ STA connects
- *       │                                       ▼
- *       └──────────────────────────── STA_CONNECTED (AP off)
+ *   AP_ACTIVE ──(creds exist at boot / POST /api/connect)──► AP_STA_CONNECTING
+ *       ▲                                                           │
+ *       │ STA drops / timeout / forget / disconnect                 │ WL_CONNECTED
+ *       │                                                           ▼
+ *       └──────────────────────────────────────── STA_CONNECTED (AP off)
  *
  * AP is always on except while STA is actively connected.
  * DNS catch-all redirects all queries to 192.168.4.1 while AP is active.
@@ -70,6 +70,41 @@ static void nvsClear()
   p.end();
 }
 
+// Static IP NVS — keys sip/sgw/ssn/sdns; all empty = DHCP
+static void nvsLoadStaticIp(String &ip, String &gw, String &sn, String &dns1)
+{
+  Preferences p;
+  p.begin("wifi-cfg", true);
+  ip   = p.getString("sip",  "");
+  gw   = p.getString("sgw",  "");
+  sn   = p.getString("ssn",  "");
+  dns1 = p.getString("sdns", "");
+  p.end();
+}
+
+static void nvsSaveStaticIp(const String &ip, const String &gw,
+                             const String &sn, const String &dns1)
+{
+  Preferences p;
+  p.begin("wifi-cfg", false);
+  p.putString("sip",  ip);
+  p.putString("sgw",  gw);
+  p.putString("ssn",  sn);
+  p.putString("sdns", dns1);
+  p.end();
+}
+
+static void nvsClearStaticIp()
+{
+  Preferences p;
+  p.begin("wifi-cfg", false);
+  p.remove("sip");
+  p.remove("sgw");
+  p.remove("ssn");
+  p.remove("sdns");
+  p.end();
+}
+
 // -- AP helpers ----------------------------------------------------------------
 static void startAP()
 {
@@ -114,6 +149,19 @@ static void beginSTA(const String &ssid, const String &pass)
   WiFi.setHostname("telemeter");
   WiFi.setAutoReconnect(true);
 
+  // Apply static IP if configured; fall through to DHCP otherwise.
+  String sip, sgw, ssn, sdns;
+  nvsLoadStaticIp(sip, sgw, ssn, sdns);
+  if (!sip.isEmpty()) {
+    IPAddress ip, gw, sn, dns1;
+    if (ip.fromString(sip) && gw.fromString(sgw) && sn.fromString(ssn)) {
+      if (sdns.isEmpty() || !dns1.fromString(sdns)) dns1 = gw; // fallback: gateway as DNS
+      WiFi.config(ip, gw, sn, dns1);
+      Serial.printf("[WIFI] Static IP: %s / %s via %s\n",
+                    sip.c_str(), ssn.c_str(), sgw.c_str());
+    }
+  }
+
   if (pass.isEmpty())
     WiFi.begin(ssid.c_str());
   else
@@ -145,13 +193,24 @@ static void handleInfo(AsyncWebServerRequest *req)
 
 // Async scan: first call triggers the scan and returns {scanning:true}.
 // Client retries until scanning:false with the full network list.
+// 300 ms dwell per channel (vs default 120 ms) improves reliability in AP+STA
+// mode where the radio shares time between serving AP clients and scanning.
+// Auto-retries up to 2 times when scan completes with 0 networks, which is a
+// common first-attempt failure in AP+STA mode.
+static uint8_t s_scanRetries = 0;
+static void startScan() {
+  WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false,
+                    /*passive=*/false, /*ms_per_chan=*/300);
+}
+
 static void handleScan(AsyncWebServerRequest *req)
 {
   int n = WiFi.scanComplete();
 
   if (n == WIFI_SCAN_FAILED)
   {
-    WiFi.scanNetworks(/*async=*/true);
+    s_scanRetries = 0;
+    startScan();
     req->send(202, "application/json", "{\"scanning\":true,\"networks\":[]}");
     return;
   }
@@ -162,6 +221,18 @@ static void handleScan(AsyncWebServerRequest *req)
     return;
   }
 
+  // Retry up to 2 times when scan returns 0 networks — common in AP+STA mode
+  // on the first attempt while the radio is busy serving AP clients.
+  if (n == 0 && s_scanRetries < 2)
+  {
+    s_scanRetries++;
+    WiFi.scanDelete();
+    startScan();
+    req->send(202, "application/json", "{\"scanning\":true,\"networks\":[]}");
+    return;
+  }
+
+  s_scanRetries = 0;
   JsonDocument doc;
   doc["scanning"] = false;
   JsonArray arr = doc["networks"].to<JsonArray>();
@@ -265,6 +336,54 @@ static void handleForget(AsyncWebServerRequest *req)
   Serial.println("[WIFI] Credentials cleared — AP restored");
 }
 
+// GET /api/staticip — returns current static IP config
+static void handleGetStaticIp(AsyncWebServerRequest *req)
+{
+  String ip, gw, sn, dns1;
+  nvsLoadStaticIp(ip, gw, sn, dns1);
+  JsonDocument doc;
+  doc["enabled"] = !ip.isEmpty();
+  doc["ip"]      = ip;
+  doc["gateway"] = gw;
+  doc["subnet"]  = sn;
+  doc["dns"]     = dns1;
+  String body;
+  serializeJson(doc, body);
+  req->send(200, "application/json", body);
+}
+
+// POST /api/staticip — body: ip=&gateway=&subnet=&dns=
+static void handleSetStaticIp(AsyncWebServerRequest *req)
+{
+  String ip = "", gw = "", sn = "255.255.255.0", dns1 = "";
+  if (req->hasParam("ip",      true)) ip   = req->getParam("ip",      true)->value();
+  if (req->hasParam("gateway", true)) gw   = req->getParam("gateway", true)->value();
+  if (req->hasParam("subnet",  true)) sn   = req->getParam("subnet",  true)->value();
+  if (req->hasParam("dns",     true)) dns1 = req->getParam("dns",     true)->value();
+  ip.trim(); gw.trim(); sn.trim(); dns1.trim();
+
+  IPAddress vip, vgw, vsn;
+  if (ip.isEmpty() || !vip.fromString(ip) || !vgw.fromString(gw) || !vsn.fromString(sn))
+  {
+    req->send(400, "application/json",
+              "{\"ok\":false,\"message\":\"Invalid IP, gateway, or subnet\"}");
+    return;
+  }
+
+  nvsSaveStaticIp(ip, gw, sn, dns1);
+  Serial.printf("[WIFI] Static IP saved: %s / %s via %s\n",
+                ip.c_str(), sn.c_str(), gw.c_str());
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+// GET /api/staticip/clear — reset to DHCP
+static void handleClearStaticIp(AsyncWebServerRequest *req)
+{
+  nvsClearStaticIp();
+  Serial.println("[WIFI] Static IP cleared — will use DHCP");
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
 /** Catch-all — redirects OS captive-portal probes to the config page.
  *  Only redirects when AP is active; falls through to 404 otherwise. */
 static void handleCatchAll(AsyncWebServerRequest *req)
@@ -308,12 +427,15 @@ void wifiConfigBegin()
 
 void wifiRegisterRoutes(AsyncWebServer &server)
 {
-  server.on("/api/info",       HTTP_GET,  handleInfo);
-  server.on("/api/scan",       HTTP_GET,  handleScan);
-  server.on("/api/connect",    HTTP_POST, handleConnect);
-  server.on("/api/wifistatus", HTTP_GET,  handleWifiStatus);
-  server.on("/api/disconnect", HTTP_GET,  handleDisconnect);
-  server.on("/api/forget",     HTTP_GET,  handleForget);
+  server.on("/api/info",            HTTP_GET,  handleInfo);
+  server.on("/api/scan",            HTTP_GET,  handleScan);
+  server.on("/api/connect",         HTTP_POST, handleConnect);
+  server.on("/api/wifistatus",      HTTP_GET,  handleWifiStatus);
+  server.on("/api/disconnect",      HTTP_GET,  handleDisconnect);
+  server.on("/api/forget",          HTTP_GET,  handleForget);
+  server.on("/api/staticip",        HTTP_GET,  handleGetStaticIp);
+  server.on("/api/staticip",        HTTP_POST, handleSetStaticIp);
+  server.on("/api/staticip/clear",  HTTP_GET,  handleClearStaticIp);
   Serial.println("[WIFI] Config routes registered");
 }
 

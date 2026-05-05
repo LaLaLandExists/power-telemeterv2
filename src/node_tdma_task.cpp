@@ -182,8 +182,8 @@ static volatile LedTdmaMode_t s_tdmaLedMode = LED_MODE_LISTEN;
 static TaskHandle_t           s_ledTaskHandle = nullptr;
 
 static void setLed(bool red, bool green) {
-  digitalWrite(LED_RED_PIN,   red   ? HIGH : LOW);
-  digitalWrite(LED_GREEN_PIN, green ? HIGH : LOW);
+  digitalWrite(LED_RED_PIN,   red   ? LOW : HIGH);
+  digitalWrite(LED_GREEN_PIN, green ? LOW : HIGH);
 }
 
 static void ledTask(void* /*params*/) {

@@ -474,7 +474,7 @@ function updNetPanel(d){
   if(icon){
     icon.className='gw-net-icon '+(apMode?'ap':'sta');
     if(apMode){
-      icon.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" opacity="0.4" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="2.5"/></svg>';
+      icon.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--wn)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="2.5"/></svg>';
     }else{
       const rssi=d.wifiRSSI||0;
       icon.innerHTML=(rssi>=-55?'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="2.5"/></svg>':rssi>=-65?'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="2.5"/></svg>':rssi>=-75?'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="2.5"/></svg>':'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="2.5"/></svg>');
@@ -488,6 +488,66 @@ function updNetPanel(d){
 let wifiSelectedSSID = '';
 let wifiPollIv = null;
 let wifiDrawerOpen = false;
+let wifiCachedStaticIp = ''; // populated on drawer open; shown in AP-dropped hint
+let wifiStaticSaved = false; // true when static IP fields match what's persisted on the server
+
+function isValidIp(s) {
+  const p = s.split('.');
+  if (p.length !== 4) return false;
+  return p.every(o => o !== '' && /^\d+$/.test(o) && +o >= 0 && +o <= 255);
+}
+
+function isValidSubnet(s) {
+  if (!isValidIp(s)) return false;
+  const n = s.split('.').map(Number).reduce((a, b) => (a << 8) | b, 0) >>> 0;
+  const inv = (~n) >>> 0;
+  return (inv & (inv + 1)) === 0;
+}
+
+function wifiSetFieldErr(id, hasErr, msg) {
+  const inp  = $(id);
+  const hint = $(id + 'Err');
+  inp.classList.toggle('err', hasErr);
+  if (hint) { hint.textContent = hasErr ? msg : ''; hint.style.display = hasErr ? '' : 'none'; }
+}
+
+function wifiValidateStaticFields() {
+  wifiStaticSaved = false;
+  const ip  = $('wifiStaticIp').value.trim();
+  const gw  = $('wifiStaticGw').value.trim();
+  const sn  = $('wifiStaticSn').value.trim();
+  const dns = $('wifiStaticDns').value.trim();
+
+  const ipOk  = isValidIp(ip);
+  const gwOk  = isValidIp(gw);
+  const snOk  = isValidSubnet(sn);
+  const dnsOk = !dns || isValidIp(dns);
+
+  wifiSetFieldErr('wifiStaticIp',  ip  && !ipOk,  'Invalid IP address');
+  wifiSetFieldErr('wifiStaticGw',  gw  && !gwOk,  'Invalid gateway address');
+  wifiSetFieldErr('wifiStaticSn',  sn  && !snOk,  'Invalid subnet mask');
+  wifiSetFieldErr('wifiStaticDns', dns && !dnsOk, 'Invalid DNS address');
+
+  // Subnet-mismatch warning (non-blocking)
+  const gwWarn = $('wifiStaticGwWarn');
+  if (ipOk && gwOk && snOk) {
+    const ipP = ip.split('.').map(Number);
+    const gwP = gw.split('.').map(Number);
+    const snP = sn.split('.').map(Number);
+    const same = ipP.every((b, i) => (b & snP[i]) === (gwP[i] & snP[i]));
+    gwWarn.textContent = same ? '' : 'Gateway not on same subnet as IP';
+    gwWarn.style.display = same ? 'none' : '';
+  } else {
+    gwWarn.textContent = ''; gwWarn.style.display = 'none';
+  }
+
+  const saveErr = $('wifiStaticSaveErr');
+  saveErr.textContent = ''; saveErr.style.display = 'none';
+
+  const allOk = ip && gw && sn && ipOk && gwOk && snOk && dnsOk;
+  $('wifiStaticSaveBtn').disabled = !allOk;
+  wifiValidateConnect();
+}
 
 function toggleWifiDrawer() {
   wifiDrawerOpen = !wifiDrawerOpen;
@@ -495,7 +555,7 @@ function toggleWifiDrawer() {
   const btn    = $('wifiCfgBtn');
   drawer.classList.toggle('open', wifiDrawerOpen);
   btn.classList.toggle('ac-active', wifiDrawerOpen);
-  if (wifiDrawerOpen) wifiShowScan();
+  if (wifiDrawerOpen) { wifiShowScan(); wifiLoadStaticIp(); }
 }
 
 /* -- Screen routing -------------------------------------------- */
@@ -622,7 +682,18 @@ function wifiToggleManual() {
 function wifiValidateConnect() {
   const manual = $('wifiManualCb').checked;
   const ssid   = manual ? $('wifiManualSSID').value.trim() : wifiSelectedSSID;
-  $('wifiConnectBtn').disabled = !ssid;
+
+  let staticOk = true;
+  if ($('wifiStaticIpCb').checked) {
+    const ip = $('wifiStaticIp').value.trim();
+    const gw = $('wifiStaticGw').value.trim();
+    const sn = $('wifiStaticSn').value.trim();
+    staticOk = wifiStaticSaved && isValidIp(ip) && isValidIp(gw) && isValidSubnet(sn);
+  }
+
+  const btn = $('wifiConnectBtn');
+  btn.disabled = !ssid || !staticOk;
+  btn.title = !staticOk ? 'Save valid static IP settings first' : '';
 }
 
 /* -- Password eye ----------------------------------------------- */
@@ -661,11 +732,13 @@ function wifiDoConnect() {
 
 function wifiPollStatus(ssid) {
   let tries = 0;
+  let failStreak = 0;
   clearInterval(wifiPollIv);
   wifiPollIv = setInterval(() => {
     fetch('/api/wifistatus')
       .then(r => r.json())
       .then(d => {
+        failStreak = 0;
         if (d.connected) {
           clearInterval(wifiPollIv);
           wifiShowResult(true, d.ip, ssid);
@@ -675,8 +748,40 @@ function wifiPollStatus(ssid) {
           wifiShowResult(false, '', ssid);
         }
       })
-      .catch(() => { tries++; });
+      .catch(() => {
+        tries++;
+        // 4 consecutive failures (~3 s) while connecting = AP was dropped by
+        // a successful STA join. The server is unreachable from this device.
+        if (++failStreak >= 4) {
+          clearInterval(wifiPollIv);
+          wifiShowApDropped(ssid);
+        }
+      });
   }, 800);
+}
+
+function wifiShowApDropped(ssid) {
+  $('wifiScr-scan').style.display       = 'none';
+  $('wifiScr-connecting').style.display = 'none';
+  $('wifiScr-result').style.display     = '';
+  const ico = $('wifiResultIcon');
+  ico.style.borderColor = 'var(--wn)';
+  ico.style.background  = 'rgba(255,159,67,.1)';
+  ico.style.color       = 'var(--wn)';
+  ico.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="2.5"/></svg>';
+  $('wifiResultTitle').textContent = 'Gateway Connected';
+  const ipHint = wifiCachedStaticIp
+    ? `<br>Static IP: <a href="http://${esc(wifiCachedStaticIp)}" target="_blank" style="color:var(--ac);font-family:monospace;font-size:12px">${esc(wifiCachedStaticIp)}</a>`
+    : '';
+  $('wifiResultSub').innerHTML =
+    `AP was turned off &mdash; gateway joined <strong>${esc(ssid)}</strong>.<br>` +
+    `Connect this device to <strong>${esc(ssid)}</strong>, then open:<br>` +
+    `<a href="http://telemeter.local" target="_blank" style="color:var(--ac);font-family:monospace;font-size:12px">http://telemeter.local</a>` +
+    ipHint +
+    `<br><br><span style="color:var(--txd);font-size:10px">If unreachable, hold the BOOT button and power-cycle to restore AP mode.</span>`;
+  const backBtn = $('wifiBackBtn');
+  backBtn.innerHTML = 'Close';
+  backBtn.onclick = () => toggleWifiDrawer();
 }
 
 function wifiCancelConnect() {
@@ -686,6 +791,90 @@ function wifiCancelConnect() {
 }
 
 
+
+/* -- Static IP -------------------------------------------------- */
+function wifiLoadStaticIp() {
+  fetch('/api/staticip')
+    .then(r => r.json())
+    .then(d => {
+      $('wifiStaticIpCb').checked = d.enabled;
+      $('wifiStaticIp').value  = d.ip      || '';
+      $('wifiStaticGw').value  = d.gateway || '';
+      $('wifiStaticSn').value  = d.subnet  || '';
+      $('wifiStaticDns').value = d.dns     || '';
+      wifiCachedStaticIp = d.enabled ? d.ip : '';
+      wifiStaticSaved = true; // fields now reflect persisted server state
+      wifiToggleStaticIp();
+    })
+    .catch(() => {});
+}
+
+function wifiToggleStaticIp() {
+  const enabled = $('wifiStaticIpCb').checked;
+  $('wifiStaticIpSection').style.display = enabled ? '' : 'none';
+  if (enabled && !$('wifiStaticIp').value) $('wifiStaticIp').focus();
+  wifiValidateConnect();
+}
+
+function wifiSaveStaticIp() {
+  const ip  = $('wifiStaticIp').value.trim();
+  const gw  = $('wifiStaticGw').value.trim();
+  const sn  = $('wifiStaticSn').value.trim();
+  const dns = $('wifiStaticDns').value.trim();
+  fetch('/api/staticip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'ip=' + encodeURIComponent(ip) +
+          '&gateway=' + encodeURIComponent(gw) +
+          '&subnet='  + encodeURIComponent(sn) +
+          '&dns='     + encodeURIComponent(dns)
+  })
+  .then(r => r.json())
+  .then(d => {
+    const saveErr = $('wifiStaticSaveErr');
+    if (d.ok) {
+      wifiCachedStaticIp = ip;
+      wifiStaticSaved = true;
+      saveErr.textContent = ''; saveErr.style.display = 'none';
+      const btn = $('wifiStaticSaveBtn');
+      const prev = btn.textContent;
+      btn.textContent = 'Saved';
+      btn.disabled = true;
+      setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 2000);
+      wifiValidateConnect();
+    } else {
+      saveErr.textContent = 'Rejected by device — check address format.';
+      saveErr.style.display = '';
+    }
+  })
+  .catch(() => {
+    const saveErr = $('wifiStaticSaveErr');
+    saveErr.textContent = 'Save failed — check connection.';
+    saveErr.style.display = '';
+  });
+}
+
+function wifiClearStaticIp() {
+  fetch('/api/staticip/clear')
+    .then(r => r.json())
+    .then(() => {
+      wifiCachedStaticIp = '';
+      $('wifiStaticIpCb').checked = false;
+      $('wifiStaticIp').value  = '';
+      $('wifiStaticGw').value  = '';
+      $('wifiStaticSn').value  = '';
+      $('wifiStaticDns').value = '';
+      ['wifiStaticIp','wifiStaticGw','wifiStaticSn','wifiStaticDns'].forEach(id => {
+        $(id).classList.remove('err');
+        const h = $(id + 'Err'); if (h) { h.textContent = ''; h.style.display = 'none'; }
+      });
+      $('wifiStaticGwWarn').textContent = ''; $('wifiStaticGwWarn').style.display = 'none';
+      $('wifiStaticSaveErr').textContent = ''; $('wifiStaticSaveErr').style.display = 'none';
+      wifiStaticSaved = true; // cleared = DHCP will be used, no unsaved config
+      wifiToggleStaticIp();
+    })
+    .catch(() => {});
+}
 
 /* -- Forget ----------------------------------------------------- */
 function wifiDoForget() {
@@ -698,8 +887,8 @@ function wifiDoForget() {
       $('wifiCredSection').style.display = 'none';
       $('wifiManualCb').checked = false;
       wifiToggleManual();
-      // Refresh status panel — gateway is now AP-only
-      setTimeout(fetchSys, 500);
+      // Reload after a short delay so the gateway has time to restore the AP
+      setTimeout(() => location.reload(), 1500);
     })
     .catch(() => {});
 }

@@ -45,19 +45,20 @@
  * -- Hardware ------------------------------------------------------------------
  *
  *   SX1278 (VSPI - identical on both roles):
- *     NSS  -> GPIO5    SCK  -> GPIO22
+ *     NSS  -> GPIO5    SCK  -> GPIO21
  *     MISO -> GPIO19   MOSI -> GPIO18
- *     DIO0 -> GPIO26   RST  -> GPIO14
- *     DIO1 -> GPIO25 (tie to GND if unused)
+ *     DIO0 -> GPIO14   RST  -> GPIO13
+ *     DIO1 -> GPIO27 (tie to GND if unused)
  *
  *   Gateway only:
  *     WiFi + LittleFS (index.html + wifi_config.html in data/ folder)
  *     Dashboard: http://telemeter.local  or  http://192.168.4.1
  *
  *   Node only:
- *     PZEM-004T v3  -> Serial2  RX2=GPIO16, TX2=GPIO17
- *     Relay signal  -> GPIO4  (active HIGH)
- *     LED           -> GPIO2  (built-in, nudge blink)
+ *     PZEM-004T v3  -> Serial2  PZEM_RX=GPIO22, PZEM_TX=GPIO23
+ *     Relay signal  -> GPIO25 (active HIGH)
+ *     LED green     -> GPIO32
+ *     LED red       -> GPIO33
  */
 
 // --- Macro resolution ---------------------------------------------------------
@@ -100,20 +101,20 @@
 
 // --- Pin definitions (shared) ------------------------------------------------
 #define LORA_PIN_NSS    5
-#define LORA_PIN_DIO0   26
-#define LORA_PIN_RST    14
-#define LORA_PIN_DIO1   25   // Tie to GND if unused
-#define LORA_PIN_SCK    22   // Remapped from GPIO18 (routing)
-#define LORA_PIN_MISO   19
 #define LORA_PIN_MOSI   18
+#define LORA_PIN_MISO   19
+#define LORA_PIN_SCK    21
+#define LORA_PIN_DIO1   27   // Tie to GND if unused
+#define LORA_PIN_DIO0   14
+#define LORA_PIN_RST    13
 
 // --- Role-specific pin definitions -------------------------------------------
 #ifdef NODE_TELEMETRY
-  #define PZEM_RX_PIN  16   // ESP32 RX2 <- PZEM TX
-  #define PZEM_TX_PIN  17   // ESP32 TX2 -> PZEM RX
-  #define RELAY_PIN_      4   // Relay signal (active HIGH)
-  #define LED_GREEN_PIN_  2   // Two-color LED - green channel (built-in LED pin)
-  #define LED_RED_PIN_   12   // Two-color LED - red channel
+  #define PZEM_RX_PIN  22   // PZEM RX  -> ESP32 TX2
+  #define PZEM_TX_PIN  23   // PZEM TX  <- ESP32 RX2
+  #define RELAY_PIN_      25  // Relay signal (active HIGH)
+  #define LED_GREEN_PIN_  32  // Two-color LED - green channel
+  #define LED_RED_PIN_    33  // Two-color LED - red channel
 
   // Exported - referenced by node_tdma_task.cpp
   uint8_t RELAY_PIN     = RELAY_PIN_;
@@ -128,7 +129,7 @@ SX1278 radio = new Module(LORA_PIN_NSS, LORA_PIN_DIO0, LORA_PIN_RST, LORA_PIN_DI
 #ifdef NODE_TELEMETRY
   #ifndef PZEM_FAKE
   // PZEM-004T v3 on Serial2 - extern-referenced by node_tdma_task.cpp
-  PZEM004Tv30 pzem(Serial2, PZEM_RX_PIN, PZEM_TX_PIN);
+  PZEM004Tv30 pzem(Serial2, PZEM_TX_PIN, PZEM_RX_PIN);
   #endif
 #endif
 
@@ -234,16 +235,16 @@ void setup() {
   digitalWrite(RELAY_PIN_, LOW);       // Relay OFF at boot
 #endif
   pinMode(LED_GREEN_PIN_, OUTPUT);
-  digitalWrite(LED_GREEN_PIN_, LOW);
+  digitalWrite(LED_GREEN_PIN_, HIGH);
   pinMode(LED_RED_PIN_,   OUTPUT);
-  digitalWrite(LED_RED_PIN_,   LOW);
+  digitalWrite(LED_RED_PIN_,   HIGH);
 
   // 3 fast green blinks - boot indicator
   for (int i = 0; i < 6; i++) {
-    digitalWrite(LED_GREEN_PIN_, i & 1);
+    digitalWrite(LED_GREEN_PIN_, i & 1 ? HIGH : LOW);
     delay(120);
   }
-  digitalWrite(LED_GREEN_PIN_, LOW);
+  digitalWrite(LED_GREEN_PIN_, HIGH);
 
   // -- SX1278 radio ----------------------------------------------------------
   SPI.begin(LORA_PIN_SCK, LORA_PIN_MISO, LORA_PIN_MOSI, LORA_PIN_NSS);

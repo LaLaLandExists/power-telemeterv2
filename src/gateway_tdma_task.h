@@ -14,7 +14,7 @@ void gatewayTdmaTaskStart();
 
 /**
  * Queue a downlink command for a node.
- * Thread-safe — may be called from the web server (Core 0).
+ * Thread-safe - may be called from the web server (Core 0).
  * The command is transmitted in the node's next DL slot (~1–2 superframes later).
  *
  * @param slotIdx  0-based index (slotId-1)

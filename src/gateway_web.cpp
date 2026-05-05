@@ -617,8 +617,8 @@ static void handleGetStatus(AsyncWebServerRequest *req)
 
   doc["uptime"] = millis() / 1000UL;
   doc["freeHeap"] = ESP.getFreeHeap();
-  doc["wifiRSSI"] = WiFi.RSSI();
-  doc["ip"] = WiFi.localIP().toString();
+  doc["wifiRSSI"] = wifiIsStaConnected() ? WiFi.RSSI() : 0;
+  doc["ip"] = wifiIsStaConnected() ? WiFi.localIP().toString() : "192.168.4.1";
   doc["loraFreq"] = LORA_CHANNELS[0];
   doc["nodeCount"] = nodeCount;
   doc["maxNodes"] = MAX_NODES;
@@ -702,7 +702,7 @@ void webServerSetup()
   // Place the .gz files alongside the originals in the data/ folder.
   server.serveStatic("/", LittleFS, "/")
         .setDefaultFile("/index.html")
-        .setCacheControl("public max-age=86400");
+        .setCacheControl("no-cache");
 
   // CORS headers on all responses
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");

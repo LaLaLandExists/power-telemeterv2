@@ -282,8 +282,12 @@ body::before{
   transition:border-color .2s;font-family:'JetBrains Mono',monospace;
 }
 .form-input:focus{border-color:var(--ac)}
+.form-input.err{border-color:var(--dg)}
+.form-input.err:focus{border-color:var(--dg)}
 .form-input::placeholder{color:var(--txd)}
 .form-input::-webkit-calendar-picker-indicator{filter:invert(.5)}
+.field-err{font-size:10px;color:var(--dg);margin-top:3px;display:none;font-family:'JetBrains Mono',monospace}
+.field-warn{font-size:10px;color:var(--wn);margin-top:3px;display:none;font-family:'JetBrains Mono',monospace}
 
 /* -- Buttons ---------------------------------- */
 .btn{
@@ -534,6 +538,7 @@ body::before{
   padding:9px 11px;border-radius:7px;
   background:var(--sf2);border:1px solid var(--bd);
   cursor:pointer;transition:all .2s;position:relative;overflow:hidden;
+  flex-shrink:0;
 }
 .wifi-net-item::before{
   content:'';position:absolute;left:0;top:0;bottom:0;width:3px;

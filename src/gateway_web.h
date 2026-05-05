@@ -27,3 +27,4 @@ void webBroadcastTelemetry(uint8_t slotIdx);
  * Called every 5 s from the gateway loop (Core 0) and on WS connect.
  */
 void webBroadcastAllNodes();
+

@@ -202,6 +202,43 @@
                   <button class="confirm-n" onclick="hideConfirm('cfmForget')">No</button>
                 </div>
               </div>
+
+              <!-- Static IP (advanced) -->
+              <div class="divider" style="margin:12px 0 8px"></div>
+              <label class="wifi-manual-row M">
+                <input type="checkbox" id="wifiStaticIpCb" onchange="wifiToggleStaticIp()"> Static IP (advanced)
+              </label>
+              <div id="wifiStaticIpSection" style="display:none">
+                <div style="font-size:10px;color:var(--txd);margin:4px 0 8px;font-family:monospace;line-height:1.5">
+                  Takes effect on next connect.<br>Leave DNS blank to use gateway address.
+                </div>
+                <div class="form-group">
+                  <label class="form-label">IP Address</label>
+                  <input class="form-input M" type="text" id="wifiStaticIp" placeholder="192.168.1.100" autocomplete="off" spellcheck="false" oninput="wifiValidateStaticFields()">
+                  <div class="field-err" id="wifiStaticIpErr"></div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Gateway</label>
+                  <input class="form-input M" type="text" id="wifiStaticGw" placeholder="192.168.1.1" autocomplete="off" spellcheck="false" oninput="wifiValidateStaticFields()">
+                  <div class="field-err" id="wifiStaticGwErr"></div>
+                  <div class="field-warn" id="wifiStaticGwWarn"></div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Subnet</label>
+                  <input class="form-input M" type="text" id="wifiStaticSn" placeholder="255.255.255.0" autocomplete="off" spellcheck="false" oninput="wifiValidateStaticFields()">
+                  <div class="field-err" id="wifiStaticSnErr"></div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">DNS</label>
+                  <input class="form-input M" type="text" id="wifiStaticDns" placeholder="8.8.8.8 (optional)" autocomplete="off" spellcheck="false" oninput="wifiValidateStaticFields()">
+                  <div class="field-err" id="wifiStaticDnsErr"></div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:6px">
+                  <button class="btn btn-primary M" id="wifiStaticSaveBtn" onclick="wifiSaveStaticIp()" style="font-size:11px;flex:1">Save</button>
+                  <button class="btn btn-ghost M" onclick="wifiClearStaticIp()" style="font-size:11px">Reset to DHCP</button>
+                </div>
+                <div class="field-err" id="wifiStaticSaveErr" style="margin-top:4px"></div>
+              </div>
             </div>
 
             <!-- Screen: connecting -->
